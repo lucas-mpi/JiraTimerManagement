@@ -76,6 +76,18 @@ app.MapGet("/api/tarefas", async (string? projectKey, bool? onlyMine, HttpContex
     return Results.Ok(issues);
 });
 
+// 4. Lista cards de Cerimônias (Daily, Planning, Reunião, Chamadas) ou cards fixados (mesmo sem assignee)
+app.MapGet("/api/cerimonias", async (string? projectKey, string? pinnedKeys, string? query, HttpContext ctx, IConfiguration config, JiraClientService jira) =>
+{
+    var creds = ResolveCredentials(ctx, config);
+    var (issues, error, statusCode) = await jira.GetCeremonyAndPinnedIssuesAsync(creds, projectKey, pinnedKeys, query);
+    if (issues == null)
+    {
+        return Results.Content(error ?? "{\"error\":\"Falha ao buscar cards de cerimônias\"}", "application/json", statusCode: statusCode);
+    }
+    return Results.Ok(issues);
+});
+
 // Endpoint original mantido e corrigido
 app.MapGet("/tarefas-jira", async (string? projectKey, HttpContext ctx, IConfiguration config, JiraClientService jira) =>
 {
@@ -89,7 +101,7 @@ app.MapGet("/tarefas-jira", async (string? projectKey, HttpContext ctx, IConfigu
     return Results.Ok(issues);
 });
 
-// 4. Registra horas (Worklog) na tarefa do Jira (arredondando < 60s para 60s)
+// 5. Registra horas (Worklog cronometrado ou manual) + comentário na tarefa do Jira
 app.MapPost("/api/tarefas/{issueKey}/worklog", async (
     string issueKey,
     WorklogRequestDto request,
@@ -98,7 +110,13 @@ app.MapPost("/api/tarefas/{issueKey}/worklog", async (
     JiraClientService jira) =>
 {
     var creds = ResolveCredentials(ctx, config);
-    var (result, error, statusCode) = await jira.AddWorklogAsync(creds, issueKey, request.TimeSpentSeconds, request.Comment);
+    var (result, error, statusCode) = await jira.AddWorklogAsync(
+        creds,
+        issueKey,
+        request.TimeSpentSeconds,
+        request.TimeSpentText,
+        request.Comment);
+
     if (result == null)
     {
         return Results.Content(error ?? "{\"error\":\"Falha ao registrar worklog no Jira\"}", "application/json", statusCode: statusCode);

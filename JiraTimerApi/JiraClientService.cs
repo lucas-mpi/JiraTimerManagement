@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace JiraTimerApi;
 
@@ -20,10 +21,11 @@ public record JiraIssueDto(
     string ProjectName,
     string AssigneeName,
     int TimeSpentSeconds,
-    string TimeSpentFormatted
+    string TimeSpentFormatted,
+    bool IsAssignedToCurrentUser
 );
 
-public record WorklogRequestDto(int TimeSpentSeconds, string? Comment = null);
+public record WorklogRequestDto(int TimeSpentSeconds = 0, string? TimeSpentText = null, string? Comment = null);
 
 public record WorklogResponseDto(
     bool Success,
@@ -31,6 +33,7 @@ public record WorklogResponseDto(
     int OriginalSeconds,
     int SyncedSeconds,
     string SyncedFormatted,
+    string CommentUsed,
     string Message
 );
 
@@ -133,6 +136,79 @@ public class JiraClientService
         var whereClause = jqlParts.Count > 0 ? string.Join(" AND ", jqlParts) : "created >= -30d";
         var jql = $"{whereClause} ORDER BY updated DESC";
 
+        return await ExecuteJqlSearchAsync(creds, jql, onlyAssignedToMe);
+    }
+
+    /// <summary>
+    /// Busca cards de Cerimônias (Daily, Planning, Retro, Reunião, Chamadas) ou cards fixados (pinnedKeys),
+    /// mesmo que não estejam atribuídos a nenhum desenvolvedor.
+    /// </summary>
+    public async Task<(List<JiraIssueDto>? Issues, string? Error, int StatusCode)> GetCeremonyAndPinnedIssuesAsync(
+        JiraCredentials creds,
+        string? projectKey = null,
+        string? pinnedKeysCsv = null,
+        string? searchText = null)
+    {
+        var orConditions = new List<string>
+        {
+            "summary ~ \"Daily\"",
+            "summary ~ \"Cerimonia\"",
+            "summary ~ \"Cerimônia\"",
+            "summary ~ \"Reuniao\"",
+            "summary ~ \"Reunião\"",
+            "summary ~ \"Planning\"",
+            "summary ~ \"Refinamento\"",
+            "summary ~ \"Retro\"",
+            "summary ~ \"Chamada\""
+        };
+
+        if (!string.IsNullOrWhiteSpace(pinnedKeysCsv))
+        {
+            var keys = pinnedKeysCsv
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(k => Regex.IsMatch(k, @"^[A-Za-z0-9]+-\d+$"))
+                .Select(k => $"\"{k.ToUpperInvariant()}\"")
+                .ToList();
+
+            if (keys.Count > 0)
+            {
+                orConditions.Add($"key IN ({string.Join(",", keys)})");
+            }
+        }
+
+        string filterClause;
+        if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            var clean = searchText.Trim().Replace("\"", "");
+            if (Regex.IsMatch(clean, @"^[A-Za-z0-9]+-\d+$"))
+            {
+                filterClause = $"key = \"{clean.ToUpperInvariant()}\"";
+            }
+            else
+            {
+                filterClause = $"summary ~ \"{clean}\"";
+            }
+        }
+        else
+        {
+            filterClause = $"({string.Join(" OR ", orConditions)})";
+        }
+
+        var jqlParts = new List<string> { filterClause };
+        if (!string.IsNullOrWhiteSpace(projectKey) && !projectKey.Equals("ALL", StringComparison.OrdinalIgnoreCase))
+        {
+            jqlParts.Add($"project = \"{projectKey.Trim()}\"");
+        }
+
+        var jql = $"{string.Join(" AND ", jqlParts)} ORDER BY updated DESC";
+        return await ExecuteJqlSearchAsync(creds, jql, false);
+    }
+
+    private async Task<(List<JiraIssueDto>? Issues, string? Error, int StatusCode)> ExecuteJqlSearchAsync(
+        JiraCredentials creds,
+        string jql,
+        bool isAssignedFilter)
+    {
         var payloadObj = new
         {
             jql,
@@ -164,6 +240,7 @@ public class JiraClientService
                 var timeTracking = fields?["timetracking"];
                 int seconds = timeTracking?["timeSpentSeconds"]?.GetValue<int>() ?? 0;
                 string formatted = timeTracking?["timeSpent"]?.ToString() ?? FormatSeconds(seconds);
+                string? assigneeName = fields?["assignee"]?["displayName"]?.ToString();
 
                 list.Add(new JiraIssueDto(
                     Id: issue["id"]?.ToString() ?? "",
@@ -172,9 +249,10 @@ public class JiraClientService
                     Status: fields?["status"]?["name"]?.ToString() ?? "Aberta",
                     ProjectKey: fields?["project"]?["key"]?.ToString() ?? "",
                     ProjectName: fields?["project"]?["name"]?.ToString() ?? "",
-                    AssigneeName: fields?["assignee"]?["displayName"]?.ToString() ?? "Não atribuído",
+                    AssigneeName: string.IsNullOrWhiteSpace(assigneeName) ? "Não atribuído (Equipe/Cerimônia)" : assigneeName,
                     TimeSpentSeconds: seconds,
-                    TimeSpentFormatted: formatted
+                    TimeSpentFormatted: formatted,
+                    IsAssignedToCurrentUser: isAssignedFilter || !string.IsNullOrWhiteSpace(assigneeName)
                 ));
             }
         }
@@ -186,13 +264,20 @@ public class JiraClientService
         JiraCredentials creds,
         string issueKey,
         int elapsedSeconds,
+        string? timeSpentText = null,
         string? commentText = null)
     {
+        int rawSeconds = elapsedSeconds;
+        if (rawSeconds <= 0 && !string.IsNullOrWhiteSpace(timeSpentText))
+        {
+            rawSeconds = ParseDurationToSeconds(timeSpentText);
+        }
+
         // Regra definida: arredondar para 60s (1 min) quando o tempo contado for menor que 1 minuto
-        int syncedSeconds = Math.Max(60, elapsedSeconds);
-        string defaultComment = string.IsNullOrWhiteSpace(commentText)
-            ? $"Registro automático via Jira Timer Desktop ({FormatSeconds(syncedSeconds)})"
-            : commentText;
+        int syncedSeconds = Math.Max(60, rawSeconds);
+        string finalComment = string.IsNullOrWhiteSpace(commentText)
+            ? $"Registro via Jira Focus Timer ({FormatSeconds(syncedSeconds)})"
+            : commentText.Trim();
 
         var worklogPayload = new
         {
@@ -211,7 +296,7 @@ public class JiraClientService
                             new
                             {
                                 type = "text",
-                                text = defaultComment
+                                text = finalComment
                             }
                         }
                     }
@@ -233,15 +318,41 @@ public class JiraClientService
         var result = new WorklogResponseDto(
             Success: true,
             IssueKey: issueKey,
-            OriginalSeconds: elapsedSeconds,
+            OriginalSeconds: rawSeconds,
             SyncedSeconds: syncedSeconds,
             SyncedFormatted: FormatSeconds(syncedSeconds),
-            Message: elapsedSeconds < 60
-                ? $"Tempo de {elapsedSeconds}s arredondado para 1m (60s) e sincronizado na tarefa {issueKey}."
+            CommentUsed: finalComment,
+            Message: rawSeconds < 60
+                ? $"Tempo de {rawSeconds}s arredondado para 1m (60s) e sincronizado na tarefa {issueKey}."
                 : $"Tempo de {FormatSeconds(syncedSeconds)} sincronizado com sucesso na tarefa {issueKey}."
         );
 
         return (result, null, 200);
+    }
+
+    public static int ParseDurationToSeconds(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return 0;
+        var text = input.Trim().ToLowerInvariant();
+
+        // Caso seja apenas número (ex: "15" -> 15 minutos)
+        if (int.TryParse(text, out int plainMinutes))
+        {
+            return plainMinutes * 60;
+        }
+
+        int totalSeconds = 0;
+        var matches = Regex.Matches(text, @"(\d+)\s*([hms])");
+        foreach (Match m in matches)
+        {
+            int val = int.Parse(m.Groups[1].Value);
+            string unit = m.Groups[2].Value;
+            if (unit == "h") totalSeconds += val * 3600;
+            else if (unit == "m") totalSeconds += val * 60;
+            else if (unit == "s") totalSeconds += val;
+        }
+
+        return totalSeconds;
     }
 
     public static string FormatSeconds(int totalSeconds)
