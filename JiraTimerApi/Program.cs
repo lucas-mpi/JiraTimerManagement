@@ -76,14 +76,26 @@ app.MapGet("/api/tarefas", async (string? projectKey, bool? onlyMine, HttpContex
     return Results.Ok(issues);
 });
 
-// 4. Lista cards de Cerimônias (Daily, Planning, Reunião, Chamadas) ou cards fixados (mesmo sem assignee)
-app.MapGet("/api/cerimonias", async (string? projectKey, string? pinnedKeys, string? query, HttpContext ctx, IConfiguration config, JiraClientService jira) =>
+// 4. Lista cards de Cerimônias (Daily, Planning, Reunião, Chamadas) mesmo sem assignee
+app.MapGet("/api/cerimonias", async (string? projectKey, string? query, HttpContext ctx, IConfiguration config, JiraClientService jira) =>
 {
     var creds = ResolveCredentials(ctx, config);
-    var (issues, error, statusCode) = await jira.GetCeremonyAndPinnedIssuesAsync(creds, projectKey, pinnedKeys, query);
+    var (issues, error, statusCode) = await jira.GetCeremonyIssuesAsync(creds, projectKey, query);
     if (issues == null)
     {
         return Results.Content(error ?? "{\"error\":\"Falha ao buscar cards de cerimônias\"}", "application/json", statusCode: statusCode);
+    }
+    return Results.Ok(issues);
+});
+
+// 4.1 Lista todos os cards ativos do Scrum e da Sustentação (mesmo sem assignee)
+app.MapGet("/api/ativos", async (string? projectKey, HttpContext ctx, IConfiguration config, JiraClientService jira) =>
+{
+    var creds = ResolveCredentials(ctx, config);
+    var (issues, error, statusCode) = await jira.GetAssignedIssuesAsync(creds, projectKey, onlyAssignedToMe: false);
+    if (issues == null)
+    {
+        return Results.Content(error ?? "{\"error\":\"Falha ao buscar cards ativos\"}", "application/json", statusCode: statusCode);
     }
     return Results.Ok(issues);
 });

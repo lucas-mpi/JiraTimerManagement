@@ -13,6 +13,13 @@ using System.Web.Script.Serialization;
 
 namespace JiraTimerManagement
 {
+    public enum JiraTabMode
+    {
+        MyTasks,
+        Ceremonies,
+        AllActive
+    }
+
     public class JiraUserConfig
     {
         public string BaseUrl { get; set; } = "https://larcoop.atlassian.net";
@@ -20,7 +27,6 @@ namespace JiraTimerManagement
         public string ApiToken { get; set; } = "";
         public string SelectedProjectKey { get; set; } = "ALL";
         public bool UseSimulationMode { get; set; } = true;
-        public List<string> PinnedIssueKeys { get; set; } = new List<string>();
     }
 
     public class JiraProjectItem
@@ -208,6 +214,47 @@ namespace JiraTimerManagement
                     TimeSpentSeconds = 1800, // 30m
                     IsAssignedToMe = false,
                     IsCeremonyOrShared = true
+                },
+
+                // Outros cards ativos do Scrum e Sustentação (não atribuídos ou atribuídos a outros membros)
+                new JiraTaskItem
+                {
+                    Id = "3001",
+                    Key = "NDSTRS-3513",
+                    Summary = "552707 - Divergencias de estoque e integração com SICOP",
+                    Status = "Aguardando Revisão",
+                    ProjectKey = "NDSTRS",
+                    ProjectName = "Sistemas Industriais",
+                    Assignee = "Não atribuído",
+                    TimeSpentSeconds = 15780, // 4h 23m
+                    IsAssignedToMe = false,
+                    IsCeremonyOrShared = false
+                },
+                new JiraTaskItem
+                {
+                    Id = "3002",
+                    Key = "NDSTRS-3520",
+                    Summary = "[Sustentação] Ajuste de concorrência no fechamento de lote fiscal",
+                    Status = "Em Andamento",
+                    ProjectKey = "NDSTRS",
+                    ProjectName = "Sistemas Industriais",
+                    Assignee = "Outro Desenvolvedor",
+                    TimeSpentSeconds = 3600,
+                    IsAssignedToMe = false,
+                    IsCeremonyOrShared = false
+                },
+                new JiraTaskItem
+                {
+                    Id = "3003",
+                    Key = "SUP-112",
+                    Summary = "[Sustentação] Investigar lentidão na consulta de romaneios",
+                    Status = "Aberto",
+                    ProjectKey = "SUP",
+                    ProjectName = "Suporte Interno TI",
+                    Assignee = "Não atribuído",
+                    TimeSpentSeconds = 0,
+                    IsAssignedToMe = false,
+                    IsCeremonyOrShared = false
                 }
             };
         }
@@ -222,10 +269,6 @@ namespace JiraTimerManagement
                     var cfg = _serializer.Deserialize<JiraUserConfig>(json);
                     if (cfg != null)
                     {
-                        if (cfg.PinnedIssueKeys == null)
-                            cfg.PinnedIssueKeys = new List<string>();
-                        else
-                            cfg.PinnedIssueKeys.RemoveAll(k => k == "NDSTRS-100" || k == "NDSTRS-101" || k == "SUP-10");
                         return cfg;
                     }
                 }
@@ -362,24 +405,25 @@ namespace JiraTimerManagement
         public async Task<(List<JiraTaskItem> Tasks, string Error)> GetTasksForTabAsync(
             JiraUserConfig config,
             string projectKey,
-            bool ceremoniesTab)
+            JiraTabMode tabMode)
         {
-            var pinnedSet = new HashSet<string>(
-                config.PinnedIssueKeys ?? new List<string>(),
-                StringComparer.OrdinalIgnoreCase);
-
             if (config.UseSimulationMode)
             {
                 await Task.Delay(120);
                 IEnumerable<JiraTaskItem> query;
 
-                if (!ceremoniesTab)
+                if (tabMode == JiraTabMode.MyTasks)
                 {
                     query = _simulatedTasks.Where(t => t.IsAssignedToMe && !IsDoneStatus(t.Status));
                 }
+                else if (tabMode == JiraTabMode.Ceremonies)
+                {
+                    query = _simulatedTasks.Where(t => t.IsCeremonyOrShared && !IsDoneStatus(t.Status));
+                }
                 else
                 {
-                    query = _simulatedTasks.Where(t => (t.IsCeremonyOrShared || pinnedSet.Contains(t.Key)) && !IsDoneStatus(t.Status));
+                    // Todos os cards ativos do Scrum e Sustentação (mesmo sem assignee)
+                    query = _simulatedTasks.Where(t => !IsDoneStatus(t.Status));
                 }
 
                 if (!string.IsNullOrWhiteSpace(projectKey) && projectKey != "ALL")
@@ -387,10 +431,8 @@ namespace JiraTimerManagement
                     query = query.Where(t => string.Equals(t.ProjectKey, projectKey, StringComparison.OrdinalIgnoreCase));
                 }
 
-                // Ordena colocando os fixados (⭐) primeiro
                 var ordered = query
-                    .OrderByDescending(t => pinnedSet.Contains(t.Key))
-                    .ThenBy(t => t.Key)
+                    .OrderBy(t => t.Key)
                     .ToList();
 
                 return (ordered, null);
@@ -399,7 +441,7 @@ namespace JiraTimerManagement
             try
             {
                 string jql;
-                if (!ceremoniesTab)
+                if (tabMode == JiraTabMode.MyTasks)
                 {
                     var jqlParts = new List<string>
                     {
@@ -412,7 +454,7 @@ namespace JiraTimerManagement
                     }
                     jql = string.Join(" AND ", jqlParts) + " ORDER BY updated DESC";
                 }
-                else
+                else if (tabMode == JiraTabMode.Ceremonies)
                 {
                     var orClauses = new List<string>
                     {
@@ -421,17 +463,6 @@ namespace JiraTimerManagement
                         "summary ~ \"Planning\"",
                         "summary ~ \"Suporte\""
                     };
-
-                    var validPinned = pinnedSet
-                        .Where(k => Regex.IsMatch(k, @"^[A-Za-z0-9]+-\d+$"))
-                        .Where(k => string.IsNullOrWhiteSpace(projectKey) || projectKey == "ALL" || k.StartsWith(projectKey + "-", StringComparison.OrdinalIgnoreCase))
-                        .Select(k => $"\"{k.ToUpperInvariant()}\"")
-                        .ToList();
-
-                    if (validPinned.Count > 0)
-                    {
-                        orClauses.Add($"key IN ({string.Join(",", validPinned)})");
-                    }
 
                     var jqlParts = new List<string>
                     {
@@ -445,8 +476,22 @@ namespace JiraTimerManagement
 
                     jql = string.Join(" AND ", jqlParts) + " ORDER BY updated DESC";
                 }
+                else
+                {
+                    // Todos os cards ativos do Scrum e da Sustentação (com ou sem responsável atribuído)
+                    var jqlParts = new List<string>
+                    {
+                        "statusCategory != Done"
+                    };
+                    if (!string.IsNullOrWhiteSpace(projectKey) && projectKey != "ALL")
+                    {
+                        jqlParts.Add($"project = \"{projectKey}\"");
+                    }
 
-                return await ExecuteJqlAsync(config, jql, !ceremoniesTab, pinnedSet);
+                    jql = string.Join(" AND ", jqlParts) + " ORDER BY updated DESC";
+                }
+
+                return await ExecuteJqlAsync(config, jql, tabMode == JiraTabMode.MyTasks);
             }
             catch (Exception ex)
             {
@@ -454,60 +499,15 @@ namespace JiraTimerManagement
             }
         }
 
-        public async Task<(JiraTaskItem Task, string Error)> FindOrCreateCardByKeyAsync(JiraUserConfig config, string issueKey, string customTitle = null)
-        {
-            if (string.IsNullOrWhiteSpace(issueKey))
-                return (null, "Informe o código do card (ex: NDSTRS-100).");
-
-            string cleanKey = issueKey.Trim().ToUpperInvariant();
-
-            if (config.UseSimulationMode)
-            {
-                await Task.Delay(100);
-                var existing = _simulatedTasks.FirstOrDefault(t => string.Equals(t.Key, cleanKey, StringComparison.OrdinalIgnoreCase));
-                if (existing != null)
-                {
-                    return (existing, null);
-                }
-
-                string proj = cleanKey.Contains("-") ? cleanKey.Split('-')[0] : "NDSTRS";
-                var created = new JiraTaskItem
-                {
-                    Id = Guid.NewGuid().ToString("N"),
-                    Key = cleanKey,
-                    Summary = string.IsNullOrWhiteSpace(customTitle)
-                        ? $"[Cerimônia / Card Fixado] Atividade compartilhada ({cleanKey})"
-                        : customTitle.Trim(),
-                    Status = "Ativo",
-                    ProjectKey = proj,
-                    ProjectName = proj,
-                    Assignee = "Não atribuído (Cerimônia/Equipe)",
-                    TimeSpentSeconds = 0,
-                    IsAssignedToMe = false,
-                    IsCeremonyOrShared = true
-                };
-                _simulatedTasks.Add(created);
-                return (created, null);
-            }
-
-            string jql = $"key = \"{cleanKey}\"";
-            var (list, err) = await ExecuteJqlAsync(config, jql, false, new HashSet<string>());
-            if (!string.IsNullOrEmpty(err)) return (null, err);
-            var found = list.FirstOrDefault();
-            if (found == null) return (null, $"Card {cleanKey} não encontrado no Jira.");
-            return (found, null);
-        }
-
         private async Task<(List<JiraTaskItem> Tasks, string Error)> ExecuteJqlAsync(
             JiraUserConfig config,
             string jql,
-            bool isMyTasksTab,
-            HashSet<string> pinnedSet)
+            bool isMyTasksTab)
         {
             var payload = new Dictionary<string, object>
             {
                 ["jql"] = jql,
-                ["maxResults"] = 45,
+                ["maxResults"] = 100,
                 ["fields"] = new[] { "summary", "status", "timetracking", "assignee", "project" }
             };
 
@@ -537,7 +537,7 @@ namespace JiraTimerManagement
                         string status = "Aberta";
                         string projKey = "";
                         string projName = "";
-                        string assignee = "Não atribuído (Cerimônia/Equipe)";
+                        string assignee = "Não atribuído";
                         bool hasAssignee = false;
                         int timeSpentSeconds = 0;
 
@@ -578,14 +578,10 @@ namespace JiraTimerManagement
                             Assignee = assignee,
                             TimeSpentSeconds = timeSpentSeconds,
                             IsAssignedToMe = isMyTasksTab || hasAssignee,
-                            IsCeremonyOrShared = !isMyTasksTab || !hasAssignee
+                            IsCeremonyOrShared = !isMyTasksTab && !hasAssignee
                         });
                     }
                 }
-
-                tasks = tasks
-                    .OrderByDescending(t => pinnedSet != null && pinnedSet.Contains(t.Key))
-                    .ToList();
 
                 return (tasks, null);
             }

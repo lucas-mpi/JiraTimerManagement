@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -18,7 +19,7 @@ namespace JiraTimerManagement
         private JiraUserConfig _config;
         private List<JiraTaskItem> _allTasks = new List<JiraTaskItem>();
 
-        private bool _isCeremoniesTab = false;
+        private JiraTabMode _currentTab = JiraTabMode.MyTasks;
         private JiraTaskItem _activeTask = null;
         private DateTime _activeStartTimeUtc;
         private int _elapsedSeconds = 0;
@@ -30,7 +31,9 @@ namespace JiraTimerManagement
 
         private JiraTaskItem _manualModalTargetTask = null;
         private readonly DispatcherTimer _stopwatchTimer;
+        private readonly DispatcherTimer _searchDebounceTimer;
         private readonly ObservableCollection<string> _syncLogs = new ObservableCollection<string>();
+        private TextBlock _emptyStateTextBlock;
 
         public TelaPrincipal()
         {
@@ -39,11 +42,40 @@ namespace JiraTimerManagement
             _syncLogs.Add("• Aguardando apontamentos (cronômetro ou manual)...");
             icSyncHistory.ItemsSource = _syncLogs;
 
+            txtActiveTaskKey.MouseEnter += (s, e) =>
+            {
+                if (_activeTask != null)
+                {
+                    txtActiveTaskKey.TextDecorations = TextDecorations.Underline;
+                }
+            };
+            txtActiveTaskKey.MouseLeave += (s, e) =>
+            {
+                txtActiveTaskKey.TextDecorations = null;
+            };
+            txtActiveTaskKey.MouseLeftButtonUp += (s, e) =>
+            {
+                if (_activeTask != null)
+                {
+                    OpenIssueInBrowser(_activeTask.Key);
+                }
+            };
+
             _stopwatchTimer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromSeconds(1)
             };
             _stopwatchTimer.Tick += StopwatchTimer_Tick;
+
+            _searchDebounceTimer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromMilliseconds(220)
+            };
+            _searchDebounceTimer.Tick += (s, e) =>
+            {
+                _searchDebounceTimer.Stop();
+                ApplySearchFilter();
+            };
 
             this.Loaded += TelaPrincipal_Loaded;
             this.Closing += TelaPrincipal_Closing;
@@ -194,24 +226,33 @@ namespace JiraTimerManagement
 
         private async void BtnTabMine_Click(object sender, RoutedEventArgs e)
         {
-            if (!_isCeremoniesTab) return;
-            _isCeremoniesTab = false;
+            if (_currentTab == JiraTabMode.MyTasks) return;
+            _currentTab = JiraTabMode.MyTasks;
             UpdateTabsVisual();
             await RefreshTasksAsync();
         }
 
         private async void BtnTabCeremonies_Click(object sender, RoutedEventArgs e)
         {
-            if (_isCeremoniesTab) return;
-            _isCeremoniesTab = true;
+            if (_currentTab == JiraTabMode.Ceremonies) return;
+            _currentTab = JiraTabMode.Ceremonies;
+            UpdateTabsVisual();
+            await RefreshTasksAsync();
+        }
+
+        private async void BtnTabAllActive_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentTab == JiraTabMode.AllActive) return;
+            _currentTab = JiraTabMode.AllActive;
             UpdateTabsVisual();
             await RefreshTasksAsync();
         }
 
         private void UpdateTabsVisual()
         {
-            btnTabMine.Style = (Style)FindResource(!_isCeremoniesTab ? "PrimaryBtn" : "SecondaryBtn");
-            btnTabCeremonies.Style = (Style)FindResource(_isCeremoniesTab ? "PrimaryBtn" : "SecondaryBtn");
+            btnTabMine.Style = (Style)FindResource(_currentTab == JiraTabMode.MyTasks ? "PrimaryBtn" : "SecondaryBtn");
+            btnTabCeremonies.Style = (Style)FindResource(_currentTab == JiraTabMode.Ceremonies ? "PrimaryBtn" : "SecondaryBtn");
+            btnTabAllActive.Style = (Style)FindResource(_currentTab == JiraTabMode.AllActive ? "PrimaryBtn" : "SecondaryBtn");
         }
 
         private async Task ConnectAndLoadAllAsync()
@@ -282,17 +323,20 @@ namespace JiraTimerManagement
         private void InpSearch_TextChanged(object sender, TextChangedEventArgs e)
         {
             if (!_isReady) return;
-            RenderTaskCards();
+            _searchDebounceTimer.Stop();
+            _searchDebounceTimer.Start();
         }
 
         private async Task RefreshTasksAsync()
         {
             string projectKey = (cmbProjects.SelectedItem as JiraProjectItem)?.Key ?? "ALL";
             btnRefresh.IsEnabled = false;
-            string tabName = _isCeremoniesTab ? "Cerimônias e Fixadas" : "Minhas Tarefas";
+            string tabName = _currentTab == JiraTabMode.MyTasks
+                ? "Minhas Tarefas"
+                : (_currentTab == JiraTabMode.Ceremonies ? "Cerimônias" : "Todos Ativos (Scrum & Sustentação)");
             SetFooter($"⏳ Buscando {tabName} ({(projectKey == "ALL" ? "Todos os projetos" : projectKey)})...", false);
 
-            var (tasks, error) = await _jiraService.GetTasksForTabAsync(_config, projectKey, _isCeremoniesTab);
+            var (tasks, error) = await _jiraService.GetTasksForTabAsync(_config, projectKey, _currentTab);
             btnRefresh.IsEnabled = true;
 
             if (!string.IsNullOrEmpty(error))
@@ -308,43 +352,59 @@ namespace JiraTimerManagement
 
         private void RenderTaskCards()
         {
+            _searchDebounceTimer.Stop();
             spTasks.Children.Clear();
 
-            string filter = (inpSearch.Text ?? "").Trim().ToLowerInvariant();
-            var filtered = _allTasks.Where(t =>
-                string.IsNullOrEmpty(filter) ||
-                (t.Key != null && t.Key.ToLowerInvariant().Contains(filter)) ||
-                (t.Summary != null && t.Summary.ToLowerInvariant().Contains(filter)) ||
-                (t.Status != null && t.Status.ToLowerInvariant().Contains(filter))
-            ).ToList();
-
-            if (filtered.Count == 0)
+            _emptyStateTextBlock = new TextBlock
             {
-                var emptyText = new TextBlock
-                {
-                    Text = _isCeremoniesTab
-                        ? "Nenhuma cerimônia neste filtro. Clique em '+ Fixar Card' para adicionar pelo código (ex: NDSTRS-100)."
-                        : "Nenhum card encontrado nesta aba/filtro.",
-                    Foreground = new SolidColorBrush(Color.FromRgb(161, 161, 170)),
-                    FontSize = 12,
-                    TextWrapping = TextWrapping.Wrap,
-                    TextAlignment = TextAlignment.Center,
-                    Margin = new Thickness(12, 28, 12, 28)
-                };
-                spTasks.Children.Add(emptyText);
-                return;
-            }
+                Text = "Nenhum card encontrado nesta aba/filtro.",
+                Foreground = new SolidColorBrush(Color.FromRgb(161, 161, 170)),
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(12, 28, 12, 28),
+                Visibility = Visibility.Collapsed
+            };
+            spTasks.Children.Add(_emptyStateTextBlock);
 
-            foreach (var task in filtered)
+            foreach (var task in _allTasks)
             {
                 bool isRunning = _activeTask != null && _activeTask.Key == task.Key;
-                bool isPinned = _config.PinnedIssueKeys != null &&
-                                _config.PinnedIssueKeys.Any(k => string.Equals(k, task.Key, StringComparison.OrdinalIgnoreCase));
-                spTasks.Children.Add(CreateCardElement(task, isRunning, isPinned));
+                var cardElement = CreateCardElement(task, isRunning);
+                cardElement.Tag = task;
+                spTasks.Children.Add(cardElement);
+            }
+
+            ApplySearchFilter();
+        }
+
+        private void ApplySearchFilter()
+        {
+            string filter = (inpSearch.Text ?? "").Trim().ToLowerInvariant();
+            int visibleCount = 0;
+
+            foreach (UIElement child in spTasks.Children)
+            {
+                if (child is FrameworkElement fe && fe.Tag is JiraTaskItem t)
+                {
+                    bool matches = string.IsNullOrEmpty(filter) ||
+                        (t.Key != null && t.Key.ToLowerInvariant().Contains(filter)) ||
+                        (t.Summary != null && t.Summary.ToLowerInvariant().Contains(filter)) ||
+                        (t.Status != null && t.Status.ToLowerInvariant().Contains(filter)) ||
+                        (t.Assignee != null && t.Assignee.ToLowerInvariant().Contains(filter));
+
+                    fe.Visibility = matches ? Visibility.Visible : Visibility.Collapsed;
+                    if (matches) visibleCount++;
+                }
+            }
+
+            if (_emptyStateTextBlock != null)
+            {
+                _emptyStateTextBlock.Visibility = visibleCount == 0 ? Visibility.Visible : Visibility.Collapsed;
             }
         }
 
-        private UIElement CreateCardElement(JiraTaskItem task, bool isRunning, bool isPinned)
+        private FrameworkElement CreateCardElement(JiraTaskItem task, bool isRunning)
         {
             var cardBorder = new Border
             {
@@ -363,20 +423,8 @@ namespace JiraTimerManagement
             // Coluna Esquerda (Informações do Card)
             var leftStack = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
 
-            // Linha 1: Estrela + Código + Status
+            // Linha 1: Código (Hyperlink para abrir no navegador) + Status
             var headerWrap = new StackPanel { Orientation = Orientation.Horizontal };
-
-            var starText = new TextBlock
-            {
-                Text = isPinned ? "★" : "☆",
-                FontSize = 13,
-                FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(isPinned ? Color.FromRgb(250, 204, 21) : Color.FromRgb(14, 165, 233)),
-                Cursor = Cursors.Hand,
-                Margin = new Thickness(0, 0, 6, 0),
-                ToolTip = "Fixar/Desafixar na aba Cerimônias"
-            };
-            starText.MouseLeftButtonUp += (s, e) => TogglePinTask(task);
 
             var keyText = new TextBlock
             {
@@ -384,8 +432,21 @@ namespace JiraTimerManagement
                 FontSize = 12.5,
                 FontWeight = FontWeights.Bold,
                 Foreground = new SolidColorBrush(Color.FromRgb(14, 165, 233)),
-                Margin = new Thickness(0, 0, 6, 0)
+                Cursor = Cursors.Hand,
+                Margin = new Thickness(0, 0, 6, 0),
+                ToolTip = $"Abrir {task.Key} no navegador"
             };
+            keyText.MouseEnter += (s, e) =>
+            {
+                keyText.TextDecorations = TextDecorations.Underline;
+                keyText.Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248));
+            };
+            keyText.MouseLeave += (s, e) =>
+            {
+                keyText.TextDecorations = null;
+                keyText.Foreground = new SolidColorBrush(Color.FromRgb(14, 165, 233));
+            };
+            keyText.MouseLeftButtonUp += (s, e) => OpenIssueInBrowser(task.Key);
 
             var statusText = new TextBlock
             {
@@ -404,7 +465,6 @@ namespace JiraTimerManagement
                 statusText.Text = $"• {task.Status} ({task.ProjectKey})";
             }
 
-            headerWrap.Children.Add(starText);
             headerWrap.Children.Add(keyText);
             headerWrap.Children.Add(statusText);
 
@@ -496,25 +556,19 @@ namespace JiraTimerManagement
             return cardBorder;
         }
 
-        private void TogglePinTask(JiraTaskItem task)
+        private void OpenIssueInBrowser(string issueKey)
         {
-            if (_config.PinnedIssueKeys == null)
-                _config.PinnedIssueKeys = new List<string>();
-
-            var existing = _config.PinnedIssueKeys.FirstOrDefault(k => string.Equals(k, task.Key, StringComparison.OrdinalIgnoreCase));
-            if (existing != null)
+            if (string.IsNullOrWhiteSpace(issueKey)) return;
+            try
             {
-                _config.PinnedIssueKeys.Remove(existing);
-                SetFooter($"Card [{task.Key}] desafixado.", false);
+                string baseUrl = (_config?.BaseUrl ?? "https://larcoop.atlassian.net").TrimEnd('/');
+                string url = $"{baseUrl}/browse/{Uri.EscapeDataString(issueKey.Trim())}";
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
             }
-            else
+            catch (Exception ex)
             {
-                _config.PinnedIssueKeys.Add(task.Key);
-                SetFooter($"★ [{task.Key}] fixado na aba de Cerimônias / Fixadas!", false);
+                SetFooter($"Falha ao abrir navegador: {ex.Message}", true);
             }
-
-            _jiraService.SaveConfig(_config);
-            RenderTaskCards();
         }
 
         // --- Modal Lançamento Manual ---
@@ -573,44 +627,6 @@ namespace JiraTimerManagement
             AppendSyncLog(target.Key, seconds, syncResult.SyncedSeconds, syncResult.Comment, true);
             RenderTaskCards();
             SetFooter($"✓ {syncResult.Message}", !syncResult.Success);
-        }
-
-        // --- Modal Fixar Card ---
-        private void BtnOpenPinModal_Click(object sender, RoutedEventArgs e)
-        {
-            modalPinOverlay.Visibility = Visibility.Visible;
-        }
-
-        private void BtnClosePinModal_Click(object sender, RoutedEventArgs e)
-        {
-            modalPinOverlay.Visibility = Visibility.Collapsed;
-        }
-
-        private async void BtnConfirmPinModal_Click(object sender, RoutedEventArgs e)
-        {
-            string key = inpPinKey.Text.Trim().ToUpperInvariant();
-            string title = inpPinTitle.Text.Trim();
-            if (string.IsNullOrWhiteSpace(key)) return;
-
-            modalPinOverlay.Visibility = Visibility.Collapsed;
-
-            var (task, err) = await _jiraService.FindOrCreateCardByKeyAsync(_config, key, title);
-            if (!string.IsNullOrEmpty(err))
-            {
-                SetFooter(err, true);
-                return;
-            }
-
-            if (!_config.PinnedIssueKeys.Any(k => string.Equals(k, task.Key, StringComparison.OrdinalIgnoreCase)))
-            {
-                _config.PinnedIssueKeys.Add(task.Key);
-                _jiraService.SaveConfig(_config);
-            }
-
-            _isCeremoniesTab = true;
-            UpdateTabsVisual();
-            await RefreshTasksAsync();
-            SetFooter($"★ Card [{task.Key}] adicionado e fixado em Cerimônias!", false);
         }
 
         // --- Fluxo do Cronômetro Ativo e Troca com 1 Clique ---
@@ -726,6 +742,9 @@ namespace JiraTimerManagement
                 txtActiveStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(14, 165, 233));
 
                 txtActiveTaskKey.Text = $"{_activeTask.Key} ({_activeTask.ProjectKey})";
+                txtActiveTaskKey.Foreground = new SolidColorBrush(Color.FromRgb(14, 165, 233));
+                txtActiveTaskKey.Cursor = Cursors.Hand;
+                txtActiveTaskKey.ToolTip = $"Abrir {_activeTask.Key} no navegador";
                 txtActiveTaskSummary.Text = _activeTask.Summary;
 
                 txtDigitalClock.Text = JiraService.FormatDigitalClock(_elapsedSeconds);
@@ -741,6 +760,9 @@ namespace JiraTimerManagement
                 txtActiveStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(161, 161, 170));
 
                 txtActiveTaskKey.Text = "Selecione uma tarefa ou cerimônia abaixo";
+                txtActiveTaskKey.Foreground = new SolidColorBrush(Color.FromRgb(244, 244, 245));
+                txtActiveTaskKey.Cursor = Cursors.Arrow;
+                txtActiveTaskKey.ToolTip = null;
                 txtActiveTaskSummary.Text = "Ao clicar em ▶ Iniciar em outra atividade, a anterior é pausada e sincronizada com o comentário.";
 
                 txtDigitalClock.Text = "00:00:00";

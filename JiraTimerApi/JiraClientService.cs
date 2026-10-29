@@ -140,13 +140,12 @@ public class JiraClientService
     }
 
     /// <summary>
-    /// Busca cards de Cerimônias (Daily, Planning, Retro, Reunião, Chamadas) ou cards fixados (pinnedKeys),
+    /// Busca cards de Cerimônias (Daily, Planning, Retro, Reunião, Chamadas),
     /// mesmo que não estejam atribuídos a nenhum desenvolvedor.
     /// </summary>
-    public async Task<(List<JiraIssueDto>? Issues, string? Error, int StatusCode)> GetCeremonyAndPinnedIssuesAsync(
+    public async Task<(List<JiraIssueDto>? Issues, string? Error, int StatusCode)> GetCeremonyIssuesAsync(
         JiraCredentials creds,
         string? projectKey = null,
-        string? pinnedKeysCsv = null,
         string? searchText = null)
     {
         var orConditions = new List<string>
@@ -156,20 +155,6 @@ public class JiraClientService
             "summary ~ \"Refinamento\"",
             "summary ~ \"Suporte\""
         };
-
-        if (!string.IsNullOrWhiteSpace(pinnedKeysCsv))
-        {
-            var keys = pinnedKeysCsv
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Where(k => Regex.IsMatch(k, @"^[A-Za-z0-9]+-\d+$"))
-                .Select(k => $"\"{k.ToUpperInvariant()}\"")
-                .ToList();
-
-            if (keys.Count > 0)
-            {
-                orConditions.Add($"key IN ({string.Join(",", keys)})");
-            }
-        }
 
         string filterClause;
         if (!string.IsNullOrWhiteSpace(searchText))

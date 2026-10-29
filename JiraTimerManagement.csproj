@@ -7,6 +7,7 @@
     <AssemblyName>JiraTimerManagement</AssemblyName>
     <UseWPF>true</UseWPF>
     <LangVersion>latest</LangVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <DefaultItemExcludes>$(DefaultItemExcludes);JiraTimerApi\**;Properties\**</DefaultItemExcludes>
   </PropertyGroup>
 

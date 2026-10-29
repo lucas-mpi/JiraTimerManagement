@@ -10,7 +10,10 @@
         Foreground="#F4F4F5"
         FontFamily="Segoe UI"
         UseLayoutRounding="True"
-        SnapsToDevicePixels="True">
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        RenderOptions.ClearTypeHint="Enabled">
 
     <!-- Remove a barra azul padrão do Windows mantendo redimensionamento e sombra nativa -->
     <shell:WindowChrome.WindowChrome>
@@ -422,12 +425,12 @@
                     <!-- Filtros e Abas -->
                     <Border DockPanel.Dock="Top" Background="#141417" BorderBrush="#27272A" BorderThickness="0,0,0,1" Padding="14,10">
                         <StackPanel>
-                            <!-- Linha 1: Abas Minhas Tarefas vs Cerimônias + Fixar Card -->
+                            <!-- Linha 1: Abas Minhas Tarefas vs Cerimônias vs Todos os Cards -->
                             <Grid Margin="0,0,0,10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="1.15*"/>
-                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <Button x:Name="btnTabMine" Grid.Column="0"
                                         Style="{StaticResource PrimaryBtn}" Margin="0,0,6,0" Padding="8,7" Click="BtnTabMine_Click">
@@ -440,13 +443,16 @@
                                         Style="{StaticResource SecondaryBtn}" Margin="0,0,6,0" Padding="8,7" Click="BtnTabCeremonies_Click">
                                     <TextBlock>
                                         <Run Text="🤝 " Foreground="#FBBF24"/>
-                                        <Run Text="Cerimônias / "/>
-                                        <Run Text="★ " Foreground="#FACC15"/>
-                                        <Run Text="Fixadas"/>
+                                        <Run Text="Cerimônias"/>
                                     </TextBlock>
                                 </Button>
-                                <Button Grid.Column="2" Content="+ Fixar Card"
-                                        Style="{StaticResource SecondaryBtn}" Padding="10,7" Click="BtnOpenPinModal_Click"/>
+                                <Button x:Name="btnTabAllActive" Grid.Column="2"
+                                        Style="{StaticResource SecondaryBtn}" Padding="8,7" Click="BtnTabAllActive_Click">
+                                    <TextBlock>
+                                        <Run Text="📋 " Foreground="#38BDF8"/>
+                                        <Run Text="Todos Ativos"/>
+                                    </TextBlock>
+                                </Button>
                             </Grid>
 
                             <!-- Linha 2: Seletor de Projeto / Time -->
@@ -528,37 +534,6 @@
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                             <Button Content="Cancelar" Style="{StaticResource SecondaryBtn}" Margin="0,0,8,0" Padding="14,6" Click="BtnCloseManualModal_Click"/>
                             <Button Content="✓ Lançar no Jira" Style="{StaticResource PrimaryBtn}" Padding="16,6" Click="BtnConfirmManualModal_Click"/>
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-            </Grid>
-
-            <!-- MODAL OVERLAY 2: FIXAR CARD DE CERIMÔNIA POR CÓDIGO -->
-            <Grid x:Name="modalPinOverlay" Visibility="Collapsed" Background="#B3000000">
-                <Border Background="#18181C" BorderBrush="#2E2E34" BorderThickness="1" CornerRadius="12"
-                        Width="370" VerticalAlignment="Center" HorizontalAlignment="Center" Padding="18">
-                    <StackPanel>
-                        <DockPanel Margin="0,0,0,10">
-                            <TextBlock FontSize="13.5" FontWeight="Bold">
-                                <Run Text="★ " Foreground="#FACC15"/>
-                                <Run Text="Fixar Card de Cerimônia / Chamada" Foreground="#F4F4F5"/>
-                            </TextBlock>
-                            <Button Content="✕" Style="{StaticResource SecondaryBtn}" Padding="6,2" HorizontalAlignment="Right" Click="BtnClosePinModal_Click"/>
-                        </DockPanel>
-
-                        <TextBlock Text="Código do Card no Jira (ex: NDSTRS-105):" FontSize="11.5" FontWeight="SemiBold" Foreground="#F4F4F5" Margin="0,0,0,4"/>
-                        <Border Background="#121215" BorderBrush="#2E2E34" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,10">
-                            <TextBox x:Name="inpPinKey" Text="NDSTRS-105" Background="Transparent" BorderThickness="0" Foreground="#F4F4F5" CaretBrush="#0EA5E9" FontSize="12"/>
-                        </Border>
-
-                        <TextBlock Text="Título / Descrição (usado no modo protótipo):" FontSize="11.5" Foreground="#A1A1AA" Margin="0,0,0,4"/>
-                        <Border Background="#121215" BorderBrush="#2E2E34" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,14">
-                            <TextBox x:Name="inpPinTitle" Text="[Cerimônia] Alinhamento Técnico / Chamada" Background="Transparent" BorderThickness="0" Foreground="#F4F4F5" CaretBrush="#0EA5E9" FontSize="12"/>
-                        </Border>
-
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                            <Button Content="Cancelar" Style="{StaticResource SecondaryBtn}" Margin="0,0,8,0" Padding="14,6" Click="BtnClosePinModal_Click"/>
-                            <Button Content="★ Fixar Card" Style="{StaticResource PrimaryBtn}" Padding="16,6" Click="BtnConfirmPinModal_Click"/>
                         </StackPanel>
                     </StackPanel>
                 </Border>
