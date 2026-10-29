@@ -1,0 +1,6 @@
+@JiraTimerApi_HostAddress = http://localhost:5034
+
+GET {{JiraTimerApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

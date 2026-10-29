@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="JiraTimerApi/JiraTimerApi.csproj" />
+  <Project Path="JiraTimerManagement.csproj" Id="84571a51-9573-4cc6-af60-5d57f53a6ae1" />
+</Solution>
