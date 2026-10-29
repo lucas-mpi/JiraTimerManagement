@@ -1,0 +1,720 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
+
+namespace JiraTimerManagement
+{
+    public partial class TelaPrincipal : Window
+    {
+        private readonly JiraService _jiraService = new JiraService();
+        private JiraUserConfig _config;
+        private List<JiraTaskItem> _allTasks = new List<JiraTaskItem>();
+
+        private bool _isCeremoniesTab = false;
+        private JiraTaskItem _activeTask = null;
+        private DateTime _activeStartTimeUtc;
+        private int _elapsedSeconds = 0;
+
+        private bool _isMiniMode = false;
+        private double _expandedHeight = 760;
+        private bool _suppressProjectChange = false;
+        private bool _isReady = false;
+
+        private JiraTaskItem _manualModalTargetTask = null;
+        private readonly DispatcherTimer _stopwatchTimer;
+        private readonly ObservableCollection<string> _syncLogs = new ObservableCollection<string>();
+
+        public TelaPrincipal()
+        {
+            InitializeComponent();
+
+            _syncLogs.Add("• Aguardando apontamentos (cronômetro ou manual)...");
+            icSyncHistory.ItemsSource = _syncLogs;
+
+            _stopwatchTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            _stopwatchTimer.Tick += StopwatchTimer_Tick;
+
+            this.Loaded += TelaPrincipal_Loaded;
+            this.Closing += TelaPrincipal_Closing;
+        }
+
+        private async void TelaPrincipal_Loaded(object sender, RoutedEventArgs e)
+        {
+            _config = _jiraService.LoadConfig();
+
+            inpUrl.Text = _config.BaseUrl;
+            inpEmail.Text = _config.Email;
+            inpToken.Password = _config.ApiToken;
+            chkSimulation.IsChecked = _config.UseSimulationMode;
+
+            UpdateCredentialInputsState();
+            _isReady = true;
+
+            await ConnectAndLoadAllAsync();
+        }
+
+        private async void TelaPrincipal_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            if (_activeTask != null && _elapsedSeconds > 0)
+            {
+                var res = MessageBox.Show(
+                    $"A atividade [{_activeTask.Key}] está com o cronômetro ativo ({JiraService.FormatDigitalClock(_elapsedSeconds)}).\n\nDeseja parar e sincronizar essas horas no Jira antes de fechar?",
+                    "Sincronizar horas pendentes?",
+                    MessageBoxButton.YesNoCancel,
+                    MessageBoxImage.Question);
+
+                if (res == MessageBoxResult.Cancel)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+
+                if (res == MessageBoxResult.Yes)
+                {
+                    e.Cancel = true;
+                    await StopAndSyncActiveTaskAsync(inpActiveComment.Text.Trim());
+                    this.Close();
+                }
+            }
+        }
+
+        private void ChkSimulation_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!_isReady) return;
+            UpdateCredentialInputsState();
+        }
+
+        private void UpdateCredentialInputsState()
+        {
+            bool isReal = chkSimulation.IsChecked != true;
+            inpUrl.IsEnabled = isReal;
+            inpEmail.IsEnabled = isReal;
+            inpToken.IsEnabled = isReal;
+        }
+
+        private void BtnTopMost_Click(object sender, RoutedEventArgs e)
+        {
+            this.Topmost = !this.Topmost;
+            UpdateTopMostVisual();
+            SetFooter(this.Topmost
+                ? "📌 Janela fixada sempre no topo (ideal durante ligações e dailys)."
+                : "Janela em modo normal.", false);
+        }
+
+        private void UpdateTopMostVisual()
+        {
+            btnTopMost.Content = this.Topmost ? "📌 Fixado" : "📌 Topo";
+            btnTopMost.Style = (Style)FindResource(this.Topmost ? "PrimaryBtn" : "SecondaryBtn");
+        }
+
+        private void BtnMini_Click(object sender, RoutedEventArgs e)
+        {
+            _isMiniMode = !_isMiniMode;
+            if (_isMiniMode)
+            {
+                _expandedHeight = this.Height;
+                pnlAccount.Visibility = Visibility.Collapsed;
+                pnlExpandableBody.Visibility = Visibility.Collapsed;
+                pnlHistorySection.Visibility = Visibility.Collapsed;
+                this.Height = 258;
+                btnMini.Content = "🗖 Lista";
+                this.Topmost = true;
+                UpdateTopMostVisual();
+            }
+            else
+            {
+                pnlExpandableBody.Visibility = Visibility.Visible;
+                pnlHistorySection.Visibility = Visibility.Visible;
+                this.Height = Math.Max(680, _expandedHeight);
+                btnMini.Content = "🗕 Mini";
+            }
+        }
+
+        private void BtnConta_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isMiniMode) BtnMini_Click(sender, e);
+            pnlAccount.Visibility = pnlAccount.Visibility == Visibility.Visible
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        }
+
+        private async void BtnSaveAccount_Click(object sender, RoutedEventArgs e)
+        {
+            _config.BaseUrl = inpUrl.Text.Trim();
+            _config.Email = inpEmail.Text.Trim();
+            _config.ApiToken = inpToken.Password.Trim();
+            _config.UseSimulationMode = chkSimulation.IsChecked == true;
+
+            _jiraService.SaveConfig(_config);
+            pnlAccount.Visibility = Visibility.Collapsed;
+
+            await ConnectAndLoadAllAsync();
+        }
+
+        private async void BtnTabMine_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_isCeremoniesTab) return;
+            _isCeremoniesTab = false;
+            UpdateTabsVisual();
+            await RefreshTasksAsync();
+        }
+
+        private async void BtnTabCeremonies_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isCeremoniesTab) return;
+            _isCeremoniesTab = true;
+            UpdateTabsVisual();
+            await RefreshTasksAsync();
+        }
+
+        private void UpdateTabsVisual()
+        {
+            btnTabMine.Style = (Style)FindResource(!_isCeremoniesTab ? "PrimaryBtn" : "SecondaryBtn");
+            btnTabCeremonies.Style = (Style)FindResource(_isCeremoniesTab ? "PrimaryBtn" : "SecondaryBtn");
+        }
+
+        private async Task ConnectAndLoadAllAsync()
+        {
+            SetFooter("⏳ Autenticando conta e carregando projetos do Jira...", false);
+            txtUserDisplay.Text = "👤 Autenticando...";
+
+            var loginRes = await _jiraService.ValidateLoginAsync(_config);
+            if (!loginRes.Success)
+            {
+                txtUserDisplay.Text = "⚠ Não autenticado (clique em ⚙ Conta)";
+                txtUserDisplay.Foreground = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+                SetFooter(loginRes.ErrorMessage, true);
+                pnlAccount.Visibility = Visibility.Visible;
+                return;
+            }
+
+            string cleanHost = (_config.BaseUrl ?? "larcoop.atlassian.net")
+                .Replace("https://", "")
+                .Replace("http://", "")
+                .TrimEnd('/');
+
+            txtUserDisplay.Text = _config.UseSimulationMode
+                ? $"👤 {_config.Email} ({cleanHost} • Protótipo)"
+                : $"👤 {_config.Email} ({cleanHost})";
+            txtUserDisplay.Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184));
+
+            _suppressProjectChange = true;
+            var projects = await _jiraService.GetProjectsAsync(_config);
+            cmbProjects.Items.Clear();
+            int selectedIdx = 0;
+
+            for (int i = 0; i < projects.Count; i++)
+            {
+                cmbProjects.Items.Add(projects[i]);
+                if (string.Equals(projects[i].Key, _config.SelectedProjectKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    selectedIdx = i;
+                }
+            }
+
+            if (cmbProjects.Items.Count > 0)
+            {
+                cmbProjects.SelectedIndex = selectedIdx;
+            }
+            _suppressProjectChange = false;
+
+            await RefreshTasksAsync();
+        }
+
+        private async void CmbProjects_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!_isReady || _suppressProjectChange) return;
+
+            if (cmbProjects.SelectedItem is JiraProjectItem proj)
+            {
+                _config.SelectedProjectKey = proj.Key;
+                _jiraService.SaveConfig(_config);
+                await RefreshTasksAsync();
+            }
+        }
+
+        private async void BtnRefresh_Click(object sender, RoutedEventArgs e)
+        {
+            await RefreshTasksAsync();
+        }
+
+        private void InpSearch_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (!_isReady) return;
+            RenderTaskCards();
+        }
+
+        private async Task RefreshTasksAsync()
+        {
+            string projectKey = (cmbProjects.SelectedItem as JiraProjectItem)?.Key ?? "ALL";
+            btnRefresh.IsEnabled = false;
+            string tabName = _isCeremoniesTab ? "Cerimônias e Fixadas" : "Minhas Tarefas";
+            SetFooter($"⏳ Buscando {tabName} ({(projectKey == "ALL" ? "Todos os projetos" : projectKey)})...", false);
+
+            var (tasks, error) = await _jiraService.GetTasksForTabAsync(_config, projectKey, _isCeremoniesTab);
+            btnRefresh.IsEnabled = true;
+
+            if (!string.IsNullOrEmpty(error))
+            {
+                SetFooter(error, true);
+                return;
+            }
+
+            _allTasks = tasks;
+            RenderTaskCards();
+            SetFooter($"✓ {_allTasks.Count} card(s) em '{tabName}'. Use ▶ Iniciar ou + Manual / 💬.", false);
+        }
+
+        private void RenderTaskCards()
+        {
+            spTasks.Children.Clear();
+
+            string filter = (inpSearch.Text ?? "").Trim().ToLowerInvariant();
+            var filtered = _allTasks.Where(t =>
+                string.IsNullOrEmpty(filter) ||
+                (t.Key != null && t.Key.ToLowerInvariant().Contains(filter)) ||
+                (t.Summary != null && t.Summary.ToLowerInvariant().Contains(filter)) ||
+                (t.Status != null && t.Status.ToLowerInvariant().Contains(filter))
+            ).ToList();
+
+            if (filtered.Count == 0)
+            {
+                var emptyText = new TextBlock
+                {
+                    Text = _isCeremoniesTab
+                        ? "Nenhuma cerimônia neste filtro. Clique em '+ Fixar Card' para adicionar pelo código (ex: NDSTRS-100)."
+                        : "Nenhum card encontrado nesta aba/filtro.",
+                    Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184)),
+                    FontSize = 12,
+                    TextWrapping = TextWrapping.Wrap,
+                    TextAlignment = TextAlignment.Center,
+                    Margin = new Thickness(12, 28, 12, 28)
+                };
+                spTasks.Children.Add(emptyText);
+                return;
+            }
+
+            foreach (var task in filtered)
+            {
+                bool isRunning = _activeTask != null && _activeTask.Key == task.Key;
+                bool isPinned = _config.PinnedIssueKeys != null &&
+                                _config.PinnedIssueKeys.Any(k => string.Equals(k, task.Key, StringComparison.OrdinalIgnoreCase));
+                spTasks.Children.Add(CreateCardElement(task, isRunning, isPinned));
+            }
+        }
+
+        private UIElement CreateCardElement(JiraTaskItem task, bool isRunning, bool isPinned)
+        {
+            var cardBorder = new Border
+            {
+                Background = new SolidColorBrush(isRunning ? Color.FromRgb(22, 34, 49) : Color.FromRgb(22, 27, 38)),
+                BorderBrush = new SolidColorBrush(isRunning ? Color.FromRgb(14, 165, 233) : Color.FromRgb(45, 55, 72)),
+                BorderThickness = new Thickness(isRunning ? 1.5 : 1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12, 10, 12, 10),
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            // Coluna Esquerda (Informações do Card)
+            var leftStack = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
+
+            // Linha 1: Estrela + Código + Status
+            var headerWrap = new StackPanel { Orientation = Orientation.Horizontal };
+
+            var starText = new TextBlock
+            {
+                Text = isPinned ? "★" : "☆",
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(isPinned ? Color.FromRgb(250, 204, 21) : Color.FromRgb(56, 189, 248)),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Margin = new Thickness(0, 0, 6, 0),
+                ToolTip = "Fixar/Desafixar na aba Cerimônias"
+            };
+            starText.MouseLeftButtonUp += (s, e) => TogglePinTask(task);
+
+            var keyText = new TextBlock
+            {
+                Text = task.Key,
+                FontSize = 12.5,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248)),
+                Margin = new Thickness(0, 0, 6, 0)
+            };
+
+            string badgeStr = task.IsCeremonyOrShared ? "🤝 Cerimônia/Time" : task.Status;
+            var statusText = new TextBlock
+            {
+                Text = $"• {badgeStr} ({task.ProjectKey})",
+                FontSize = 11.5,
+                Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            headerWrap.Children.Add(starText);
+            headerWrap.Children.Add(keyText);
+            headerWrap.Children.Add(statusText);
+
+            // Linha 2: Resumo / Título
+            var summaryText = new TextBlock
+            {
+                Text = task.Summary,
+                FontSize = 12,
+                FontWeight = FontWeights.Medium,
+                Foreground = new SolidColorBrush(Color.FromRgb(241, 245, 249)),
+                TextWrapping = TextWrapping.Wrap,
+                MaxHeight = 36,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 4, 0, 6)
+            };
+
+            // Linha 3: Tempo gasto no Jira + Último comentário
+            var timeLine = new TextBlock
+            {
+                FontSize = 11.5,
+                Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184)),
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            timeLine.Inlines.Add(new System.Windows.Documents.Run("⏱ No Jira: "));
+            timeLine.Inlines.Add(new System.Windows.Documents.Run(task.FormattedTimeSpent)
+            {
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(241, 245, 249))
+            });
+
+            if (isRunning)
+            {
+                timeLine.Inlines.Add(new System.Windows.Documents.Run(" (Contando...)")
+                {
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248))
+                });
+            }
+            else if (!string.IsNullOrWhiteSpace(task.LastComment))
+            {
+                timeLine.Inlines.Add(new System.Windows.Documents.Run($" • 💬 \"{task.LastComment}\""));
+            }
+
+            leftStack.Children.Add(headerWrap);
+            leftStack.Children.Add(summaryText);
+            leftStack.Children.Add(timeLine);
+
+            // Coluna Direita (Botões Iniciar/Parar e + Manual / 💬)
+            var rightStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Width = 104 };
+
+            var btnAction = new Button
+            {
+                Content = isRunning ? "⏹ Parar" : "▶ Iniciar",
+                Style = (Style)FindResource(isRunning ? "DangerBtn" : "PrimaryBtn"),
+                Padding = new Thickness(10, 6, 10, 6),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            btnAction.Click += async (s, e) =>
+            {
+                if (isRunning)
+                {
+                    await StopAndSyncActiveTaskAsync(inpActiveComment.Text.Trim());
+                }
+                else
+                {
+                    await StartOrSwitchTaskAsync(task);
+                }
+            };
+
+            var btnManual = new Button
+            {
+                Content = "+ Manual / 💬",
+                Style = (Style)FindResource("SecondaryBtn"),
+                FontSize = 11,
+                Padding = new Thickness(8, 5, 8, 5)
+            };
+            btnManual.Click += (s, e) => OpenManualModal(task);
+
+            rightStack.Children.Add(btnAction);
+            rightStack.Children.Add(btnManual);
+
+            Grid.SetColumn(leftStack, 0);
+            Grid.SetColumn(rightStack, 1);
+            grid.Children.Add(leftStack);
+            grid.Children.Add(rightStack);
+
+            cardBorder.Child = grid;
+            return cardBorder;
+        }
+
+        private void TogglePinTask(JiraTaskItem task)
+        {
+            if (_config.PinnedIssueKeys == null)
+                _config.PinnedIssueKeys = new List<string>();
+
+            var existing = _config.PinnedIssueKeys.FirstOrDefault(k => string.Equals(k, task.Key, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+            {
+                _config.PinnedIssueKeys.Remove(existing);
+                SetFooter($"Card [{task.Key}] desafixado.", false);
+            }
+            else
+            {
+                _config.PinnedIssueKeys.Add(task.Key);
+                SetFooter($"⭐ [{task.Key}] fixado na aba de Cerimônias / Fixadas!", false);
+            }
+
+            _jiraService.SaveConfig(_config);
+            RenderTaskCards();
+        }
+
+        // --- Modal Lançamento Manual ---
+        private void OpenManualModal(JiraTaskItem task)
+        {
+            _manualModalTargetTask = task;
+            txtModalTitle.Text = $"Lançar Horas Manuais — {task.Key}";
+            txtModalSummary.Text = task.Summary;
+            inpManualDuration.Text = "15m";
+            inpManualComment.Text = task.IsCeremonyOrShared
+                ? "Participação na cerimônia / alinhamento técnico da equipe"
+                : "";
+            modalManualOverlay.Visibility = Visibility.Visible;
+        }
+
+        private void BtnCloseManualModal_Click(object sender, RoutedEventArgs e)
+        {
+            modalManualOverlay.Visibility = Visibility.Collapsed;
+            _manualModalTargetTask = null;
+        }
+
+        private void BtnPreset_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string preset)
+            {
+                inpManualDuration.Text = preset;
+            }
+        }
+
+        private async void BtnConfirmManualModal_Click(object sender, RoutedEventArgs e)
+        {
+            if (_manualModalTargetTask == null) return;
+
+            int seconds = JiraService.ParseDurationToSeconds(inpManualDuration.Text);
+            if (seconds <= 0)
+            {
+                MessageBox.Show("Informe um tempo válido (ex: 15m, 30m, 1h 30m ou 45).", "Atenção", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var target = _manualModalTargetTask;
+            string comment = inpManualComment.Text.Trim();
+            modalManualOverlay.Visibility = Visibility.Collapsed;
+            _manualModalTargetTask = null;
+
+            SetFooter($"⏳ Lançando +{JiraService.FormatDuration(seconds)} manualmente em [{target.Key}]...", false);
+
+            var syncResult = await _jiraService.LogWorkAsync(_config, target.Key, seconds, comment);
+            if (syncResult.Success && !_config.UseSimulationMode)
+            {
+                target.TimeSpentSeconds += syncResult.SyncedSeconds;
+                if (!string.IsNullOrWhiteSpace(comment))
+                    target.LastComment = comment;
+            }
+
+            AppendSyncLog(target.Key, seconds, syncResult.SyncedSeconds, syncResult.Comment, true);
+            RenderTaskCards();
+            SetFooter($"✓ {syncResult.Message}", !syncResult.Success);
+        }
+
+        // --- Modal Fixar Card ---
+        private void BtnOpenPinModal_Click(object sender, RoutedEventArgs e)
+        {
+            modalPinOverlay.Visibility = Visibility.Visible;
+        }
+
+        private void BtnClosePinModal_Click(object sender, RoutedEventArgs e)
+        {
+            modalPinOverlay.Visibility = Visibility.Collapsed;
+        }
+
+        private async void BtnConfirmPinModal_Click(object sender, RoutedEventArgs e)
+        {
+            string key = inpPinKey.Text.Trim().ToUpperInvariant();
+            string title = inpPinTitle.Text.Trim();
+            if (string.IsNullOrWhiteSpace(key)) return;
+
+            modalPinOverlay.Visibility = Visibility.Collapsed;
+
+            var (task, err) = await _jiraService.FindOrCreateCardByKeyAsync(_config, key, title);
+            if (!string.IsNullOrEmpty(err))
+            {
+                SetFooter(err, true);
+                return;
+            }
+
+            if (!_config.PinnedIssueKeys.Any(k => string.Equals(k, task.Key, StringComparison.OrdinalIgnoreCase)))
+            {
+                _config.PinnedIssueKeys.Add(task.Key);
+                _jiraService.SaveConfig(_config);
+            }
+
+            _isCeremoniesTab = true;
+            UpdateTabsVisual();
+            await RefreshTasksAsync();
+            SetFooter($"⭐ Card [{task.Key}] adicionado e fixado em Cerimônias!", false);
+        }
+
+        // --- Fluxo do Cronômetro Ativo e Troca com 1 Clique ---
+        private async Task StartOrSwitchTaskAsync(JiraTaskItem newTask)
+        {
+            JiraTaskItem previousTask = _activeTask;
+            int previousElapsed = _elapsedSeconds;
+            string previousComment = inpActiveComment.Text.Trim();
+
+            _activeTask = newTask;
+            _activeStartTimeUtc = DateTime.UtcNow;
+            _elapsedSeconds = 0;
+            inpActiveComment.Text = "";
+            _stopwatchTimer.Start();
+
+            UpdateActiveBannerUI();
+            RenderTaskCards();
+
+            if (previousTask != null && previousTask.Key != newTask.Key)
+            {
+                string autoNote = string.IsNullOrWhiteSpace(previousComment)
+                    ? $"Troca automática para {newTask.Key}"
+                    : previousComment;
+
+                SetFooter($"⚡ Pausando [{previousTask.Key}] ({JiraService.FormatDuration(previousElapsed)}) e sincronizando no Jira... Iniciando [{newTask.Key}]!", false);
+
+                var syncResult = await _jiraService.LogWorkAsync(_config, previousTask.Key, previousElapsed, autoNote);
+                if (syncResult.Success && !_config.UseSimulationMode)
+                {
+                    previousTask.TimeSpentSeconds += syncResult.SyncedSeconds;
+                    if (!string.IsNullOrWhiteSpace(previousComment))
+                        previousTask.LastComment = previousComment;
+                }
+
+                AppendSyncLog(previousTask.Key, previousElapsed, syncResult.SyncedSeconds, syncResult.Comment, false);
+                RenderTaskCards();
+                SetFooter($"⚡ {syncResult.Message} → Contando [{newTask.Key}]", !syncResult.Success);
+            }
+            else
+            {
+                SetFooter($"▶ Contagem iniciada em [{newTask.Key}].", false);
+            }
+        }
+
+        private async void BtnStopMain_Click(object sender, RoutedEventArgs e)
+        {
+            await StopAndSyncActiveTaskAsync(inpActiveComment.Text.Trim());
+        }
+
+        private async Task StopAndSyncActiveTaskAsync(string userComment)
+        {
+            if (_activeTask == null) return;
+
+            _stopwatchTimer.Stop();
+            var stoppedTask = _activeTask;
+            int totalElapsed = _elapsedSeconds;
+
+            _activeTask = null;
+            _elapsedSeconds = 0;
+            inpActiveComment.Text = "";
+
+            UpdateActiveBannerUI();
+            RenderTaskCards();
+
+            SetFooter($"⏳ Sincronizando horas de [{stoppedTask.Key}] no Jira...", false);
+
+            var syncResult = await _jiraService.LogWorkAsync(_config, stoppedTask.Key, totalElapsed, userComment);
+            if (syncResult.Success && !_config.UseSimulationMode)
+            {
+                stoppedTask.TimeSpentSeconds += syncResult.SyncedSeconds;
+                if (!string.IsNullOrWhiteSpace(userComment))
+                    stoppedTask.LastComment = userComment;
+            }
+
+            AppendSyncLog(stoppedTask.Key, totalElapsed, syncResult.SyncedSeconds, syncResult.Comment, false);
+            RenderTaskCards();
+            SetFooter($"✓ {syncResult.Message}", !syncResult.Success);
+        }
+
+        private void AppendSyncLog(string issueKey, int rawSeconds, int syncedSeconds, string comment, bool isManual)
+        {
+            if (_syncLogs.Count == 1 && _syncLogs[0].StartsWith("•"))
+            {
+                _syncLogs.Clear();
+            }
+
+            string timeStr = DateTime.Now.ToString("HH:mm:ss");
+            string modeTag = isManual
+                ? "Manual"
+                : (rawSeconds < 60 ? $"Arred. de {rawSeconds}s" : "Cronômetro");
+
+            _syncLogs.Insert(0, $"✓ {timeStr} — [{issueKey}] +{JiraService.FormatDuration(syncedSeconds)} ({modeTag}) • 💬 \"{comment}\"");
+        }
+
+        private void StopwatchTimer_Tick(object sender, EventArgs e)
+        {
+            if (_activeTask == null)
+            {
+                _stopwatchTimer.Stop();
+                return;
+            }
+
+            _elapsedSeconds = (int)Math.Max(1, (DateTime.UtcNow - _activeStartTimeUtc).TotalSeconds);
+            txtDigitalClock.Text = JiraService.FormatDigitalClock(_elapsedSeconds);
+        }
+
+        private void UpdateActiveBannerUI()
+        {
+            if (_activeTask != null)
+            {
+                bdrActiveBanner.Background = new SolidColorBrush(Color.FromRgb(17, 34, 51));
+                txtActiveStatusBadge.Text = "🟢 EM CONTAGEM ATIVA (CLIQUE EM OUTRA TAREFA SE ALGUÉM LIGAR)";
+                txtActiveStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248));
+
+                txtActiveTaskKey.Text = $"{_activeTask.Key} ({_activeTask.ProjectKey})";
+                txtActiveTaskSummary.Text = _activeTask.Summary;
+
+                txtDigitalClock.Text = JiraService.FormatDigitalClock(_elapsedSeconds);
+                txtDigitalClock.Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248));
+
+                btnStopMain.IsEnabled = true;
+                btnStopMain.Style = (Style)FindResource("DangerBtn");
+            }
+            else
+            {
+                bdrActiveBanner.Background = new SolidColorBrush(Color.FromRgb(22, 27, 38));
+                txtActiveStatusBadge.Text = "⏸ NENHUMA TAREFA EM CONTAGEM";
+                txtActiveStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184));
+
+                txtActiveTaskKey.Text = "Selecione uma tarefa ou cerimônia abaixo";
+                txtActiveTaskSummary.Text = "Ao clicar em ▶ Iniciar em outra atividade, a anterior é pausada e sincronizada com o comentário.";
+
+                txtDigitalClock.Text = "00:00:00";
+                txtDigitalClock.Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184));
+
+                btnStopMain.IsEnabled = false;
+                btnStopMain.Style = (Style)FindResource("SecondaryBtn");
+            }
+        }
+
+        private void SetFooter(string message, bool isError)
+        {
+            txtFooterStatus.Text = message;
+            txtFooterStatus.Foreground = new SolidColorBrush(
+                isError ? Color.FromRgb(248, 113, 113) : Color.FromRgb(52, 211, 153));
+        }
+    }
+}
