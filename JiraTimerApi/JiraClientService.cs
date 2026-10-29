@@ -121,7 +121,7 @@ public class JiraClientService
         string? projectKey = null,
         bool onlyAssignedToMe = true)
     {
-        var jqlParts = new List<string>();
+        var jqlParts = new List<string> { "statusCategory != Done" };
 
         if (onlyAssignedToMe)
         {
@@ -194,7 +194,7 @@ public class JiraClientService
             filterClause = $"({string.Join(" OR ", orConditions)})";
         }
 
-        var jqlParts = new List<string> { filterClause };
+        var jqlParts = new List<string> { filterClause, "statusCategory != Done" };
         if (!string.IsNullOrWhiteSpace(projectKey) && !projectKey.Equals("ALL", StringComparison.OrdinalIgnoreCase))
         {
             jqlParts.Add($"project = \"{projectKey.Trim()}\"");

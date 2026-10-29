@@ -373,11 +373,11 @@ namespace JiraTimerManagement
 
                 if (!ceremoniesTab)
                 {
-                    query = _simulatedTasks.Where(t => t.IsAssignedToMe);
+                    query = _simulatedTasks.Where(t => t.IsAssignedToMe && !IsDoneStatus(t.Status));
                 }
                 else
                 {
-                    query = _simulatedTasks.Where(t => t.IsCeremonyOrShared || pinnedSet.Contains(t.Key));
+                    query = _simulatedTasks.Where(t => (t.IsCeremonyOrShared || pinnedSet.Contains(t.Key)) && !IsDoneStatus(t.Status));
                 }
 
                 if (!string.IsNullOrWhiteSpace(projectKey) && projectKey != "ALL")
@@ -399,7 +399,11 @@ namespace JiraTimerManagement
                 string jql;
                 if (!ceremoniesTab)
                 {
-                    var jqlParts = new List<string> { "assignee = currentUser()" };
+                    var jqlParts = new List<string>
+                    {
+                        "assignee = currentUser()",
+                        "statusCategory != Done"
+                    };
                     if (!string.IsNullOrWhiteSpace(projectKey) && projectKey != "ALL")
                     {
                         jqlParts.Add($"project = \"{projectKey}\"");
@@ -431,7 +435,11 @@ namespace JiraTimerManagement
                         orClauses.Add($"key IN ({string.Join(",", validPinned)})");
                     }
 
-                    var jqlParts = new List<string> { $"({string.Join(" OR ", orClauses)})" };
+                    var jqlParts = new List<string>
+                    {
+                        $"({string.Join(" OR ", orClauses)})",
+                        "statusCategory != Done"
+                    };
                     if (!string.IsNullOrWhiteSpace(projectKey) && projectKey != "ALL")
                     {
                         jqlParts.Add($"project = \"{projectKey}\"");
@@ -721,6 +729,13 @@ namespace JiraTimerManagement
             }
 
             return totalSeconds;
+        }
+
+        private static bool IsDoneStatus(string status)
+        {
+            if (string.IsNullOrWhiteSpace(status)) return false;
+            string s = status.Trim().ToLowerInvariant();
+            return s == "done" || s == "concluído" || s == "concluido" || s == "concluída" || s == "concluida" || s == "closed" || s == "fechado" || s == "finalizado";
         }
 
         private static string Truncate(string value, int maxLen)
