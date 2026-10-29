@@ -20,7 +20,7 @@ namespace JiraTimerManagement
         public string ApiToken { get; set; } = "";
         public string SelectedProjectKey { get; set; } = "ALL";
         public bool UseSimulationMode { get; set; } = true;
-        public List<string> PinnedIssueKeys { get; set; } = new List<string> { "NDSTRS-100", "NDSTRS-101", "SUP-10" };
+        public List<string> PinnedIssueKeys { get; set; } = new List<string>();
     }
 
     public class JiraProjectItem
@@ -223,7 +223,9 @@ namespace JiraTimerManagement
                     if (cfg != null)
                     {
                         if (cfg.PinnedIssueKeys == null)
-                            cfg.PinnedIssueKeys = new List<string> { "NDSTRS-100", "NDSTRS-101", "SUP-10" };
+                            cfg.PinnedIssueKeys = new List<string>();
+                        else
+                            cfg.PinnedIssueKeys.RemoveAll(k => k == "NDSTRS-100" || k == "NDSTRS-101" || k == "SUP-10");
                         return cfg;
                     }
                 }
@@ -414,19 +416,15 @@ namespace JiraTimerManagement
                 {
                     var orClauses = new List<string>
                     {
-                        "summary ~ \"Daily\"",
-                        "summary ~ \"Cerimonia\"",
-                        "summary ~ \"Cerimônia\"",
-                        "summary ~ \"Reuniao\"",
-                        "summary ~ \"Reunião\"",
-                        "summary ~ \"Planning\"",
+                        "summary ~ \"Reuniões\"",
                         "summary ~ \"Refinamento\"",
-                        "summary ~ \"Retro\"",
-                        "summary ~ \"Chamada\""
+                        "summary ~ \"Planning\"",
+                        "summary ~ \"Suporte\""
                     };
 
                     var validPinned = pinnedSet
                         .Where(k => Regex.IsMatch(k, @"^[A-Za-z0-9]+-\d+$"))
+                        .Where(k => string.IsNullOrWhiteSpace(projectKey) || projectKey == "ALL" || k.StartsWith(projectKey + "-", StringComparison.OrdinalIgnoreCase))
                         .Select(k => $"\"{k.ToUpperInvariant()}\"")
                         .ToList();
 

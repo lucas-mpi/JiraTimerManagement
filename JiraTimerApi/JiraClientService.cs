@@ -151,15 +151,10 @@ public class JiraClientService
     {
         var orConditions = new List<string>
         {
-            "summary ~ \"Daily\"",
-            "summary ~ \"Cerimonia\"",
-            "summary ~ \"Cerimônia\"",
-            "summary ~ \"Reuniao\"",
-            "summary ~ \"Reunião\"",
+            "summary ~ \"Reuniões\"",
             "summary ~ \"Planning\"",
             "summary ~ \"Refinamento\"",
-            "summary ~ \"Retro\"",
-            "summary ~ \"Chamada\""
+            "summary ~ \"Suporte\""
         };
 
         if (!string.IsNullOrWhiteSpace(pinnedKeysCsv))
