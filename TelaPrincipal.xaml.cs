@@ -5,6 +5,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -22,7 +24,7 @@ namespace JiraTimerManagement
         private int _elapsedSeconds = 0;
 
         private bool _isMiniMode = false;
-        private double _expandedHeight = 760;
+        private double _expandedHeight = 765;
         private bool _suppressProjectChange = false;
         private bool _isReady = false;
 
@@ -45,6 +47,36 @@ namespace JiraTimerManagement
 
             this.Loaded += TelaPrincipal_Loaded;
             this.Closing += TelaPrincipal_Closing;
+        }
+
+        private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ClickCount == 2)
+            {
+                BtnMaximizeWindow_Click(sender, e);
+                return;
+            }
+            if (e.LeftButton == MouseButtonState.Pressed)
+            {
+                this.DragMove();
+            }
+        }
+
+        private void BtnMinimizeWindow_Click(object sender, RoutedEventArgs e)
+        {
+            this.WindowState = WindowState.Minimized;
+        }
+
+        private void BtnMaximizeWindow_Click(object sender, RoutedEventArgs e)
+        {
+            this.WindowState = this.WindowState == WindowState.Maximized
+                ? WindowState.Normal
+                : WindowState.Maximized;
+        }
+
+        private void BtnCloseWindow_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
         }
 
         private async void TelaPrincipal_Loaded(object sender, RoutedEventArgs e)
@@ -112,7 +144,7 @@ namespace JiraTimerManagement
 
         private void UpdateTopMostVisual()
         {
-            btnTopMost.Content = this.Topmost ? "📌 Fixado" : "📌 Topo";
+            runTopMostText.Text = this.Topmost ? "Fixado" : "Topo";
             btnTopMost.Style = (Style)FindResource(this.Topmost ? "PrimaryBtn" : "SecondaryBtn");
         }
 
@@ -125,7 +157,7 @@ namespace JiraTimerManagement
                 pnlAccount.Visibility = Visibility.Collapsed;
                 pnlExpandableBody.Visibility = Visibility.Collapsed;
                 pnlHistorySection.Visibility = Visibility.Collapsed;
-                this.Height = 258;
+                this.Height = 285;
                 btnMini.Content = "🗖 Lista";
                 this.Topmost = true;
                 UpdateTopMostVisual();
@@ -185,13 +217,13 @@ namespace JiraTimerManagement
         private async Task ConnectAndLoadAllAsync()
         {
             SetFooter("⏳ Autenticando conta e carregando projetos do Jira...", false);
-            txtUserDisplay.Text = "👤 Autenticando...";
+            runUserDisplay.Text = "Autenticando...";
 
             var loginRes = await _jiraService.ValidateLoginAsync(_config);
             if (!loginRes.Success)
             {
-                txtUserDisplay.Text = "⚠ Não autenticado (clique em ⚙ Conta)";
-                txtUserDisplay.Foreground = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+                runUserDisplay.Text = "Não autenticado (clique em ⚙ Conta)";
+                runUserDisplay.Foreground = new SolidColorBrush(Color.FromRgb(248, 113, 113));
                 SetFooter(loginRes.ErrorMessage, true);
                 pnlAccount.Visibility = Visibility.Visible;
                 return;
@@ -202,10 +234,10 @@ namespace JiraTimerManagement
                 .Replace("http://", "")
                 .TrimEnd('/');
 
-            txtUserDisplay.Text = _config.UseSimulationMode
-                ? $"👤 {_config.Email} ({cleanHost} • Protótipo)"
-                : $"👤 {_config.Email} ({cleanHost})";
-            txtUserDisplay.Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184));
+            runUserDisplay.Text = _config.UseSimulationMode
+                ? $"{_config.Email} ({cleanHost} • Protótipo)"
+                : $"{_config.Email} ({cleanHost})";
+            runUserDisplay.Foreground = new SolidColorBrush(Color.FromRgb(161, 161, 170));
 
             _suppressProjectChange = true;
             var projects = await _jiraService.GetProjectsAsync(_config);
@@ -293,7 +325,7 @@ namespace JiraTimerManagement
                     Text = _isCeremoniesTab
                         ? "Nenhuma cerimônia neste filtro. Clique em '+ Fixar Card' para adicionar pelo código (ex: NDSTRS-100)."
                         : "Nenhum card encontrado nesta aba/filtro.",
-                    Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184)),
+                    Foreground = new SolidColorBrush(Color.FromRgb(161, 161, 170)),
                     FontSize = 12,
                     TextWrapping = TextWrapping.Wrap,
                     TextAlignment = TextAlignment.Center,
@@ -316,8 +348,8 @@ namespace JiraTimerManagement
         {
             var cardBorder = new Border
             {
-                Background = new SolidColorBrush(isRunning ? Color.FromRgb(22, 34, 49) : Color.FromRgb(22, 27, 38)),
-                BorderBrush = new SolidColorBrush(isRunning ? Color.FromRgb(14, 165, 233) : Color.FromRgb(45, 55, 72)),
+                Background = new SolidColorBrush(isRunning ? Color.FromRgb(24, 30, 38) : Color.FromRgb(24, 24, 28)),
+                BorderBrush = new SolidColorBrush(isRunning ? Color.FromRgb(2, 132, 199) : Color.FromRgb(46, 46, 52)),
                 BorderThickness = new Thickness(isRunning ? 1.5 : 1),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(12, 10, 12, 10),
@@ -339,8 +371,8 @@ namespace JiraTimerManagement
                 Text = isPinned ? "★" : "☆",
                 FontSize = 13,
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(isPinned ? Color.FromRgb(250, 204, 21) : Color.FromRgb(56, 189, 248)),
-                Cursor = System.Windows.Input.Cursors.Hand,
+                Foreground = new SolidColorBrush(isPinned ? Color.FromRgb(250, 204, 21) : Color.FromRgb(14, 165, 233)),
+                Cursor = Cursors.Hand,
                 Margin = new Thickness(0, 0, 6, 0),
                 ToolTip = "Fixar/Desafixar na aba Cerimônias"
             };
@@ -351,18 +383,26 @@ namespace JiraTimerManagement
                 Text = task.Key,
                 FontSize = 12.5,
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248)),
+                Foreground = new SolidColorBrush(Color.FromRgb(14, 165, 233)),
                 Margin = new Thickness(0, 0, 6, 0)
             };
 
-            string badgeStr = task.IsCeremonyOrShared ? "🤝 Cerimônia/Time" : task.Status;
             var statusText = new TextBlock
             {
-                Text = $"• {badgeStr} ({task.ProjectKey})",
                 FontSize = 11.5,
-                Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184)),
+                Foreground = new SolidColorBrush(Color.FromRgb(161, 161, 170)),
                 VerticalAlignment = VerticalAlignment.Center
             };
+            if (task.IsCeremonyOrShared)
+            {
+                statusText.Inlines.Add(new Run("• "));
+                statusText.Inlines.Add(new Run("🤝 ") { Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36)) });
+                statusText.Inlines.Add(new Run($"Cerimônia/Time ({task.ProjectKey})"));
+            }
+            else
+            {
+                statusText.Text = $"• {task.Status} ({task.ProjectKey})";
+            }
 
             headerWrap.Children.Add(starText);
             headerWrap.Children.Add(keyText);
@@ -374,7 +414,7 @@ namespace JiraTimerManagement
                 Text = task.Summary,
                 FontSize = 12,
                 FontWeight = FontWeights.Medium,
-                Foreground = new SolidColorBrush(Color.FromRgb(241, 245, 249)),
+                Foreground = new SolidColorBrush(Color.FromRgb(244, 244, 245)),
                 TextWrapping = TextWrapping.Wrap,
                 MaxHeight = 36,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -385,27 +425,28 @@ namespace JiraTimerManagement
             var timeLine = new TextBlock
             {
                 FontSize = 11.5,
-                Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184)),
+                Foreground = new SolidColorBrush(Color.FromRgb(161, 161, 170)),
                 TextTrimming = TextTrimming.CharacterEllipsis
             };
-            timeLine.Inlines.Add(new System.Windows.Documents.Run("⏱ No Jira: "));
-            timeLine.Inlines.Add(new System.Windows.Documents.Run(task.FormattedTimeSpent)
+            timeLine.Inlines.Add(new Run("⏱ No Jira: "));
+            timeLine.Inlines.Add(new Run(task.FormattedTimeSpent)
             {
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(241, 245, 249))
+                Foreground = new SolidColorBrush(Color.FromRgb(244, 244, 245))
             });
 
             if (isRunning)
             {
-                timeLine.Inlines.Add(new System.Windows.Documents.Run(" (Contando...)")
+                timeLine.Inlines.Add(new Run(" (Contando...)")
                 {
                     FontWeight = FontWeights.SemiBold,
-                    Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248))
+                    Foreground = new SolidColorBrush(Color.FromRgb(14, 165, 233))
                 });
             }
             else if (!string.IsNullOrWhiteSpace(task.LastComment))
             {
-                timeLine.Inlines.Add(new System.Windows.Documents.Run($" • 💬 \"{task.LastComment}\""));
+                timeLine.Inlines.Add(new Run(" • 💬 ") { Foreground = new SolidColorBrush(Color.FromRgb(244, 244, 245)) });
+                timeLine.Inlines.Add(new Run($"\"{task.LastComment}\""));
             }
 
             leftStack.Children.Add(headerWrap);
@@ -417,7 +458,7 @@ namespace JiraTimerManagement
 
             var btnAction = new Button
             {
-                Content = isRunning ? "⏹ Parar" : "▶ Iniciar",
+                Content = isRunning ? "■ Parar" : "▶ Iniciar",
                 Style = (Style)FindResource(isRunning ? "DangerBtn" : "PrimaryBtn"),
                 Padding = new Thickness(10, 6, 10, 6),
                 Margin = new Thickness(0, 0, 0, 6)
@@ -469,7 +510,7 @@ namespace JiraTimerManagement
             else
             {
                 _config.PinnedIssueKeys.Add(task.Key);
-                SetFooter($"⭐ [{task.Key}] fixado na aba de Cerimônias / Fixadas!", false);
+                SetFooter($"★ [{task.Key}] fixado na aba de Cerimônias / Fixadas!", false);
             }
 
             _jiraService.SaveConfig(_config);
@@ -569,7 +610,7 @@ namespace JiraTimerManagement
             _isCeremoniesTab = true;
             UpdateTabsVisual();
             await RefreshTasksAsync();
-            SetFooter($"⭐ Card [{task.Key}] adicionado e fixado em Cerimônias!", false);
+            SetFooter($"★ Card [{task.Key}] adicionado e fixado em Cerimônias!", false);
         }
 
         // --- Fluxo do Cronômetro Ativo e Troca com 1 Clique ---
@@ -680,30 +721,30 @@ namespace JiraTimerManagement
         {
             if (_activeTask != null)
             {
-                bdrActiveBanner.Background = new SolidColorBrush(Color.FromRgb(17, 34, 51));
+                bdrActiveBanner.Background = new SolidColorBrush(Color.FromRgb(20, 30, 38));
                 txtActiveStatusBadge.Text = "🟢 EM CONTAGEM ATIVA (CLIQUE EM OUTRA TAREFA SE ALGUÉM LIGAR)";
-                txtActiveStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248));
+                txtActiveStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(14, 165, 233));
 
                 txtActiveTaskKey.Text = $"{_activeTask.Key} ({_activeTask.ProjectKey})";
                 txtActiveTaskSummary.Text = _activeTask.Summary;
 
                 txtDigitalClock.Text = JiraService.FormatDigitalClock(_elapsedSeconds);
-                txtDigitalClock.Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248));
+                txtDigitalClock.Foreground = new SolidColorBrush(Color.FromRgb(14, 165, 233));
 
                 btnStopMain.IsEnabled = true;
                 btnStopMain.Style = (Style)FindResource("DangerBtn");
             }
             else
             {
-                bdrActiveBanner.Background = new SolidColorBrush(Color.FromRgb(22, 27, 38));
+                bdrActiveBanner.Background = new SolidColorBrush(Color.FromRgb(24, 24, 28));
                 txtActiveStatusBadge.Text = "⏸ NENHUMA TAREFA EM CONTAGEM";
-                txtActiveStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184));
+                txtActiveStatusBadge.Foreground = new SolidColorBrush(Color.FromRgb(161, 161, 170));
 
                 txtActiveTaskKey.Text = "Selecione uma tarefa ou cerimônia abaixo";
                 txtActiveTaskSummary.Text = "Ao clicar em ▶ Iniciar em outra atividade, a anterior é pausada e sincronizada com o comentário.";
 
                 txtDigitalClock.Text = "00:00:00";
-                txtDigitalClock.Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184));
+                txtDigitalClock.Foreground = new SolidColorBrush(Color.FromRgb(161, 161, 170));
 
                 btnStopMain.IsEnabled = false;
                 btnStopMain.Style = (Style)FindResource("SecondaryBtn");
@@ -714,7 +755,7 @@ namespace JiraTimerManagement
         {
             txtFooterStatus.Text = message;
             txtFooterStatus.Foreground = new SolidColorBrush(
-                isError ? Color.FromRgb(248, 113, 113) : Color.FromRgb(52, 211, 153));
+                isError ? Color.FromRgb(248, 113, 113) : Color.FromRgb(228, 228, 231));
         }
     }
 }
