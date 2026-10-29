@@ -23,8 +23,9 @@ namespace JiraTimerManagement
 
         // Modo Mini-Widget compacto
         private bool _isMiniMode = false;
-        private int _expandedHeight = 720;
+        private int _expandedHeight = 760;
         private bool _suppressProjectChange = false;
+        private bool _hasLoggedAnyHistory = false;
 
         public Form1()
         {
@@ -35,6 +36,10 @@ namespace JiraTimerManagement
 
         private async void Form1_Load(object sender, EventArgs e)
         {
+            // Placeholders nativos (Cue Banner) iguais ao protótipo
+            SendMessage(txtActiveComment.Handle, EM_SETCUEBANNER, 0, "Ex: Ligação com suporte / Daily Scrum / Ajuste no cálculo...");
+            SendMessage(txtSearch.Handle, EM_SETCUEBANNER, 0, "Filtrar por código (ex: NDSTRS-100, Daily) ou título...");
+
             _config = _jiraService.LoadConfig();
 
             txtBaseUrl.Text = _config.BaseUrl;
@@ -44,6 +49,8 @@ namespace JiraTimerManagement
 
             UpdateCredentialFieldsState();
             UpdateTabButtonsVisual();
+            RecalculateResponsivePositions();
+
             await ConnectAndLoadAllAsync();
         }
 
@@ -66,7 +73,7 @@ namespace JiraTimerManagement
                 if (answer == DialogResult.Yes)
                 {
                     e.Cancel = true;
-                    await StopAndSyncActiveTaskAsync("Fechamento do aplicativo");
+                    await StopAndSyncActiveTaskAsync(txtActiveComment.Text.Trim());
                     this.Close();
                 }
             }
@@ -85,12 +92,31 @@ namespace JiraTimerManagement
             UpdateCredentialFieldsState();
         }
 
-        private void ChkTopMost_CheckedChanged(object sender, EventArgs e)
+        private void BtnTopMost_Click(object sender, EventArgs e)
         {
-            this.TopMost = chkTopMost.Checked;
+            this.TopMost = !this.TopMost;
+            UpdateTopMostButtonVisual();
             SetStatus(this.TopMost
                 ? "📌 Janela fixada sempre no topo (ideal durante ligações e dailys)."
                 : "Janela em modo normal.", false);
+        }
+
+        private void UpdateTopMostButtonVisual()
+        {
+            if (this.TopMost)
+            {
+                btnTopMost.BackColor = Color.FromArgb(2, 132, 199);
+                btnTopMost.ForeColor = Color.White;
+                btnTopMost.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
+                btnTopMost.Text = "📌 Fixado";
+            }
+            else
+            {
+                btnTopMost.BackColor = Color.FromArgb(26, 32, 44);
+                btnTopMost.ForeColor = Color.FromArgb(241, 245, 249);
+                btnTopMost.FlatAppearance.BorderColor = Color.FromArgb(45, 55, 72);
+                btnTopMost.Text = "📌 Topo";
+            }
         }
 
         private void BtnToggleMini_Click(object sender, EventArgs e)
@@ -103,17 +129,20 @@ namespace JiraTimerManagement
                 pnlConfig.Visible = false;
                 pnlFilters.Visible = false;
                 flpTasks.Visible = false;
+                pnlHistory.Visible = false;
                 this.ClientSize = new Size(this.ClientSize.Width, pnlHeader.Height + pnlActiveTimer.Height + pnlFooter.Height);
                 btnToggleMini.Text = "🗖 Lista";
                 this.TopMost = true;
-                chkTopMost.Checked = true;
+                UpdateTopMostButtonVisual();
             }
             else
             {
                 pnlFilters.Visible = true;
                 flpTasks.Visible = true;
-                this.Height = Math.Max(600, _expandedHeight);
+                pnlHistory.Visible = true;
+                this.Height = Math.Max(640, _expandedHeight);
                 btnToggleMini.Text = "🗕 Mini";
+                RecalculateResponsivePositions();
             }
         }
 
@@ -124,6 +153,7 @@ namespace JiraTimerManagement
                 BtnToggleMini_Click(sender, e);
             }
             pnlConfig.Visible = !pnlConfig.Visible;
+            RecalculateResponsivePositions();
         }
 
         private async void BtnSaveConnect_Click(object sender, EventArgs e)
@@ -157,16 +187,20 @@ namespace JiraTimerManagement
 
         private void UpdateTabButtonsVisual()
         {
-            Color activeBg = Color.FromArgb(37, 99, 235);
-            Color inactiveBg = Color.FromArgb(30, 38, 54);
+            Color activeBg = Color.FromArgb(2, 132, 199);
+            Color inactiveBg = Color.FromArgb(26, 32, 44);
             Color activeFg = Color.White;
             Color inactiveFg = Color.FromArgb(148, 163, 184);
 
             btnTabMyTasks.BackColor = !_isCeremoniesTab ? activeBg : inactiveBg;
             btnTabMyTasks.ForeColor = !_isCeremoniesTab ? activeFg : inactiveFg;
+            btnTabMyTasks.FlatAppearance.BorderSize = !_isCeremoniesTab ? 0 : 1;
+            btnTabMyTasks.FlatAppearance.BorderColor = Color.FromArgb(45, 55, 72);
 
             btnTabCeremonies.BackColor = _isCeremoniesTab ? activeBg : inactiveBg;
             btnTabCeremonies.ForeColor = _isCeremoniesTab ? activeFg : inactiveFg;
+            btnTabCeremonies.FlatAppearance.BorderSize = _isCeremoniesTab ? 0 : 1;
+            btnTabCeremonies.FlatAppearance.BorderColor = Color.FromArgb(45, 55, 72);
         }
 
         private async void BtnPinNewCard_Click(object sender, EventArgs e)
@@ -191,7 +225,7 @@ namespace JiraTimerManagement
                     _isCeremoniesTab = true;
                     UpdateTabButtonsVisual();
                     await RefreshTasksAsync();
-                    SetStatus($"⭐ Card [{task.Key}] fixado na aba de Cerimônias / Fixadas!", false);
+                    SetStatus($"★ Card [{task.Key}] fixado na aba de Cerimônias / Fixadas!", false);
                 }
             }
         }
@@ -211,10 +245,16 @@ namespace JiraTimerManagement
                 return;
             }
 
-            lblUserStatus.Text = $"👤 {loginRes.DisplayName}";
-            lblUserStatus.ForeColor = _config.UseSimulationMode
-                ? Color.FromArgb(250, 204, 21)
-                : Color.FromArgb(52, 211, 153);
+            string cleanHost = (_config.BaseUrl ?? "larcoop.atlassian.net")
+                .Replace("https://", "")
+                .Replace("http://", "")
+                .TrimEnd('/');
+
+            lblUserStatus.Text = _config.UseSimulationMode
+                ? $"👤 {_config.Email} ({cleanHost} • Protótipo)"
+                : $"👤 {_config.Email} ({cleanHost})";
+
+            lblUserStatus.ForeColor = Color.FromArgb(148, 163, 184);
 
             _suppressProjectChange = true;
             var projects = await _jiraService.GetProjectsAsync(_config);
@@ -261,17 +301,6 @@ namespace JiraTimerManagement
             RenderTaskCards();
         }
 
-        private void FlpTasks_SizeChanged(object sender, EventArgs e)
-        {
-            flpTasks.SuspendLayout();
-            int cardWidth = Math.Max(380, flpTasks.ClientSize.Width - 26);
-            foreach (Control ctrl in flpTasks.Controls)
-            {
-                ctrl.Width = cardWidth;
-            }
-            flpTasks.ResumeLayout();
-        }
-
         private async Task RefreshTasksAsync()
         {
             string projectKey = (cmbProjects.SelectedItem as JiraProjectItem)?.Key ?? "ALL";
@@ -290,7 +319,7 @@ namespace JiraTimerManagement
 
             _allTasks = tasks;
             RenderTaskCards();
-            SetStatus($"✓ {_allTasks.Count} card(s) em '{tabName}'. Use ▶ Iniciar ou + Manual / 💬.", false);
+            SetStatus($"✓ {_allTasks.Count} card(s) em '{tabName}'. Use ▶ Iniciar ou + Manual.", false);
         }
 
         private void RenderTaskCards()
@@ -306,7 +335,7 @@ namespace JiraTimerManagement
                 (t.Status != null && t.Status.ToLowerInvariant().Contains(filter))
             ).ToList();
 
-            int cardWidth = Math.Max(380, flpTasks.ClientSize.Width - 26);
+            int cardWidth = GetOptimalCardWidth();
 
             if (filtered.Count == 0)
             {
@@ -319,7 +348,7 @@ namespace JiraTimerManagement
                     ForeColor = Color.FromArgb(148, 163, 184),
                     Font = new Font("Segoe UI", 9F),
                     Text = _isCeremoniesTab
-                        ? "Nenhuma cerimônia encontrada neste filtro. Clique em '+ Fixar Card' para adicionar pela chave (ex: NDSTRS-100)."
+                        ? "Nenhuma cerimônia neste filtro. Clique em '+ Fixar Card' para adicionar pelo código."
                         : "Nenhuma atividade atribuída encontrada para o filtro selecionado."
                 };
                 flpTasks.Controls.Add(lblEmpty);
@@ -342,64 +371,59 @@ namespace JiraTimerManagement
         private Panel BuildTaskCard(JiraTaskItem task, bool isRunning, bool isPinned, int width)
         {
             Color bgCard = isRunning
-                ? Color.FromArgb(22, 54, 47)
-                : Color.FromArgb(30, 38, 54);
+                ? Color.FromArgb(18, 42, 58)
+                : Color.FromArgb(22, 27, 38);
+
+            Color borderCard = isRunning
+                ? Color.FromArgb(14, 165, 233)
+                : Color.FromArgb(45, 55, 72);
 
             var card = new Panel
             {
                 Width = width,
                 Height = 96,
                 BackColor = bgCard,
-                Margin = new Padding(2, 4, 2, 4),
+                Margin = new Padding(0, 0, 0, 8),
                 Padding = new Padding(12, 8, 12, 8)
             };
 
-            // Barra lateral colorida indicando estado (Verde=Rodando, Amarelo=Cerimônia/Fixada, Azul=Tarefa)
-            var stripe = new Panel
+            card.Paint += (s, e) =>
             {
-                Width = 4,
-                Dock = DockStyle.Left,
-                BackColor = isRunning
-                    ? Color.FromArgb(16, 185, 129)
-                    : (task.IsCeremonyOrShared || isPinned)
-                        ? Color.FromArgb(250, 204, 21)
-                        : Color.FromArgb(56, 189, 248)
+                using (var pen = new Pen(borderCard, isRunning ? 2 : 1))
+                {
+                    e.Graphics.DrawRectangle(pen, 0, 0, card.Width - 1, card.Height - 1);
+                }
             };
 
-            // Botão ⭐ Fixar / Desafixar
-            var btnPin = new Button
+            // Botão ★ Fixar / Desafixar
+            var btnPin = new Label
             {
-                Size = new Size(28, 24),
-                Location = new Point(10, 6),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.Transparent,
-                ForeColor = isPinned ? Color.FromArgb(250, 204, 21) : Color.FromArgb(100, 116, 139),
-                Font = new Font("Segoe UI", 9.5F),
+                AutoSize = true,
+                Location = new Point(12, 9),
+                ForeColor = isPinned ? Color.FromArgb(250, 204, 21) : Color.FromArgb(14, 165, 233),
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
                 Text = isPinned ? "★" : "☆",
                 Cursor = Cursors.Hand
             };
-            btnPin.FlatAppearance.BorderSize = 0;
             btnPin.Click += (s, e) => TogglePinTask(task);
 
             // Chave da Tarefa
             var lblKey = new Label
             {
                 AutoSize = true,
-                Location = new Point(40, 8),
-                Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold),
-                ForeColor = isRunning
-                    ? Color.FromArgb(52, 211, 153)
-                    : (task.IsCeremonyOrShared ? Color.FromArgb(250, 204, 21) : Color.FromArgb(56, 189, 248)),
+                Location = new Point(32, 9),
+                Font = new Font("Segoe UI", 9.25F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(14, 165, 233),
                 Text = task.Key
             };
 
-            // Badge de Status + Indicador de Cerimônia/Não atribuído
-            string roleBadge = task.IsCeremonyOrShared ? "🤝 Cerimônia/Time" : task.Status;
+            // Badge de Status
+            string roleBadge = task.IsCeremonyOrShared ? "Cerimônia/Time" : task.Status;
             var lblStatus = new Label
             {
                 AutoSize = true,
-                Location = new Point(136, 10),
-                Font = new Font("Segoe UI", 7.75F, FontStyle.Regular),
+                Location = new Point(118, 10),
+                Font = new Font("Segoe UI", 8.25F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(148, 163, 184),
                 Text = $"• {roleBadge} ({task.ProjectKey})"
             };
@@ -408,9 +432,8 @@ namespace JiraTimerManagement
             var lblSummary = new Label
             {
                 AutoEllipsis = true,
-                Location = new Point(14, 34),
-                Size = new Size(width - 132, 32),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Location = new Point(12, 33),
+                Size = new Size(width - 134, 34),
                 Font = new Font("Segoe UI", 8.75F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(241, 245, 249),
                 Text = task.Summary
@@ -419,35 +442,33 @@ namespace JiraTimerManagement
             // Tempo total já registrado no Jira + último comentário se houver
             string commentSuffix = string.IsNullOrWhiteSpace(task.LastComment)
                 ? ""
-                : $" • 💬 \"{ (task.LastComment.Length > 26 ? task.LastComment.Substring(0, 26) + "..." : task.LastComment) }\"";
+                : $" • \"{ (task.LastComment.Length > 24 ? task.LastComment.Substring(0, 24) + "..." : task.LastComment) }\"";
 
             var lblTimeSpent = new Label
             {
                 AutoEllipsis = true,
-                Location = new Point(14, 68),
-                Size = new Size(width - 132, 18),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Font = new Font("Segoe UI Semibold", 8F, FontStyle.Bold),
-                ForeColor = isRunning ? Color.FromArgb(110, 231, 183) : Color.FromArgb(148, 163, 184),
+                Location = new Point(12, 69),
+                Size = new Size(width - 134, 18),
+                Font = new Font("Segoe UI Semibold", 8.25F, FontStyle.Bold),
+                ForeColor = isRunning ? Color.FromArgb(56, 189, 248) : Color.FromArgb(148, 163, 184),
                 Text = isRunning
                     ? $"⏱ No Jira: {task.FormattedTimeSpent} (Contando...)"
                     : $"⏱ No Jira: {task.FormattedTimeSpent}{commentSuffix}"
             };
 
-            // Botão Iniciar / Parar Cronômetro
+            // Botão Iniciar / Parar (Azul igual ao protótipo!)
             var btnAction = new Button
             {
-                Size = new Size(106, 36),
-                Location = new Point(width - 116, 12),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Size = new Size(102, 34),
+                Location = new Point(width - 114, 14),
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
                 Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold),
                 ForeColor = Color.White,
                 BackColor = isRunning
                     ? Color.FromArgb(220, 38, 38)
-                    : Color.FromArgb(16, 185, 129),
-                Text = isRunning ? "⏹ Parar" : "▶ Iniciar"
+                    : Color.FromArgb(2, 132, 199),
+                Text = isRunning ? "■ Parar" : "▶ Iniciar"
             };
             btnAction.FlatAppearance.BorderSize = 0;
 
@@ -463,24 +484,32 @@ namespace JiraTimerManagement
                 }
             };
 
-            // Botão + Manual / 💬 Comentário
+            // Botão + Manual / Comentário
             var btnManual = new Button
             {
-                Size = new Size(106, 32),
-                Location = new Point(width - 116, 54),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Size = new Size(102, 30),
+                Location = new Point(width - 114, 54),
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
                 Font = new Font("Segoe UI Semibold", 8F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(226, 232, 240),
-                BackColor = Color.FromArgb(45, 55, 72),
-                Text = "+ Manual / 💬"
+                BackColor = Color.FromArgb(15, 18, 25),
+                Text = "+ Manual"
             };
-            btnManual.FlatAppearance.BorderColor = Color.FromArgb(71, 85, 105);
+            btnManual.FlatAppearance.BorderColor = Color.FromArgb(45, 55, 72);
+            btnManual.FlatAppearance.BorderSize = 1;
 
             btnManual.Click += async (s, e) =>
             {
                 await OpenManualWorklogModalAsync(task);
+            };
+
+            card.Resize += (s, e) =>
+            {
+                btnAction.Left = card.Width - 114;
+                btnManual.Left = card.Width - 114;
+                lblSummary.Width = Math.Max(160, btnAction.Left - 20);
+                lblTimeSpent.Width = Math.Max(160, btnAction.Left - 20);
             };
 
             card.Controls.Add(btnAction);
@@ -490,7 +519,6 @@ namespace JiraTimerManagement
             card.Controls.Add(lblStatus);
             card.Controls.Add(lblSummary);
             card.Controls.Add(lblTimeSpent);
-            card.Controls.Add(stripe);
 
             return card;
         }
@@ -509,7 +537,7 @@ namespace JiraTimerManagement
             else
             {
                 _config.PinnedIssueKeys.Add(task.Key);
-                SetStatus($"⭐ Card [{task.Key}] fixado na aba de Cerimônias / Fixadas!", false);
+                SetStatus($"★ Card [{task.Key}] fixado na aba de Cerimônias / Fixadas!", false);
             }
 
             _jiraService.SaveConfig(_config);
@@ -537,26 +565,19 @@ namespace JiraTimerManagement
                             task.LastComment = modal.EnteredComment;
                     }
 
+                    AppendSyncHistoryLog(task.Key, modal.EnteredSeconds, syncResult.SyncedSeconds, syncResult.Comment, true);
                     RenderTaskCards();
                     SetStatus($"✓ {syncResult.Message}", !syncResult.Success);
                 }
             }
         }
 
-        /// <summary>
-        /// Regra principal:
-        /// - Ao escolher uma tarefa/cerimônia e clicar em Iniciar, a contagem de horas inicia.
-        /// - Se alguém ligar e o usuário clicar em Iniciar em outra tarefa/cerimônia,
-        ///   a contagem da anterior é interrompida e sincronizada com o comentário digitado,
-        ///   e inicia-se imediatamente uma nova contagem para a tarefa atual!
-        /// </summary>
         private async Task StartOrSwitchTaskAsync(JiraTaskItem newTask)
         {
             JiraTaskItem previousTask = _activeTask;
             int previousElapsed = _elapsedSeconds;
             string previousComment = txtActiveComment.Text.Trim();
 
-            // 1. Inicia imediatamente o cronômetro para a nova tarefa/cerimônia selecionada
             _activeTask = newTask;
             _activeStartTimeUtc = DateTime.UtcNow;
             _elapsedSeconds = 0;
@@ -566,11 +587,10 @@ namespace JiraTimerManagement
             UpdateActiveBannerUI();
             RenderTaskCards();
 
-            // 2. Se havia uma tarefa anterior rodando, sincroniza o tempo e comentário dela em background!
             if (previousTask != null && previousTask.Key != newTask.Key)
             {
                 string autoNote = string.IsNullOrWhiteSpace(previousComment)
-                    ? $"Troca rápida para {newTask.Key} via Jira Focus Timer"
+                    ? $"Troca automática para {newTask.Key}"
                     : previousComment;
 
                 SetStatus($"⚡ Pausando [{previousTask.Key}] ({JiraService.FormatDuration(previousElapsed)}) e sincronizando no Jira... Iniciando [{newTask.Key}]!", false);
@@ -588,12 +608,13 @@ namespace JiraTimerManagement
                         previousTask.LastComment = previousComment;
                 }
 
+                AppendSyncHistoryLog(previousTask.Key, previousElapsed, syncResult.SyncedSeconds, syncResult.Comment, false);
                 RenderTaskCards();
                 SetStatus($"⚡ {syncResult.Message} → Contando [{newTask.Key}]", !syncResult.Success);
             }
             else
             {
-                SetStatus($"▶ Contagem iniciada em [{newTask.Key}] — digite um comentário opcional acima.", false);
+                SetStatus($"▶ Contagem iniciada em [{newTask.Key}].", false);
             }
         }
 
@@ -632,8 +653,26 @@ namespace JiraTimerManagement
                     stoppedTask.LastComment = userComment;
             }
 
+            AppendSyncHistoryLog(stoppedTask.Key, totalElapsed, syncResult.SyncedSeconds, syncResult.Comment, false);
             RenderTaskCards();
             SetStatus($"✓ {syncResult.Message}", !syncResult.Success);
+        }
+
+        private void AppendSyncHistoryLog(string issueKey, int rawSeconds, int syncedSeconds, string comment, bool isManual)
+        {
+            if (!_hasLoggedAnyHistory)
+            {
+                lstSyncHistory.Items.Clear();
+                _hasLoggedAnyHistory = true;
+            }
+
+            string timeStr = DateTime.Now.ToString("HH:mm:ss");
+            string modeStr = isManual
+                ? "Manual"
+                : (rawSeconds < 60 ? $"Arred. de {rawSeconds}s" : "Cronômetro");
+
+            string line = $"✓ {timeStr} — [{issueKey}] +{JiraService.FormatDuration(syncedSeconds)} ({modeStr}) • \"{comment}\"";
+            lstSyncHistory.Items.Insert(0, line);
         }
 
         private void TmrStopwatch_Tick(object sender, EventArgs e)
@@ -656,9 +695,9 @@ namespace JiraTimerManagement
         {
             if (_activeTask != null)
             {
-                pnlActiveTimer.BackColor = Color.FromArgb(20, 48, 42);
-                lblActiveBadge.Text = "🟢 EM CONTAGEM ATIVA (CLIQUE EM OUTRA TAREFA SE ALGUÉM LIGAR)";
-                lblActiveBadge.ForeColor = Color.FromArgb(52, 211, 153);
+                pnlActiveTimer.BackColor = Color.FromArgb(16, 36, 52);
+                lblActiveBadge.Text = "● EM CONTAGEM ATIVA (CLIQUE EM OUTRA TAREFA SE ALGUÉM LIGAR)";
+                lblActiveBadge.ForeColor = Color.FromArgb(56, 189, 248);
 
                 lblActiveTaskKey.Text = $"{_activeTask.Key} ({_activeTask.ProjectKey})";
                 lblActiveTaskKey.ForeColor = Color.White;
@@ -667,28 +706,32 @@ namespace JiraTimerManagement
                 lblActiveTaskTitle.ForeColor = Color.FromArgb(203, 213, 225);
 
                 lblTimerClock.Text = JiraService.FormatDigitalClock(_elapsedSeconds);
-                lblTimerClock.ForeColor = Color.FromArgb(52, 211, 153);
+                lblTimerClock.ForeColor = Color.FromArgb(56, 189, 248);
 
                 btnStopActive.Enabled = true;
                 btnStopActive.BackColor = Color.FromArgb(220, 38, 38);
+                btnStopActive.ForeColor = Color.White;
+                btnStopActive.FlatAppearance.BorderColor = Color.FromArgb(239, 68, 68);
             }
             else
             {
-                pnlActiveTimer.BackColor = Color.FromArgb(30, 38, 54);
-                lblActiveBadge.Text = "⏸ NENHUMA TAREFA EM CONTAGEM";
+                pnlActiveTimer.BackColor = Color.FromArgb(22, 27, 38);
+                lblActiveBadge.Text = "II  NENHUMA TAREFA EM CONTAGEM";
                 lblActiveBadge.ForeColor = Color.FromArgb(148, 163, 184);
 
                 lblActiveTaskKey.Text = "Selecione uma tarefa ou cerimônia abaixo";
                 lblActiveTaskKey.ForeColor = Color.FromArgb(241, 245, 249);
 
-                lblActiveTaskTitle.Text = "Se alguém ligar durante uma atividade, basta clicar em ▶ Iniciar na nova demanda para pausar e sincronizar a anterior.";
+                lblActiveTaskTitle.Text = "Ao clicar em ▶ Iniciar em outra atividade, a anterior é sincronizada.";
                 lblActiveTaskTitle.ForeColor = Color.FromArgb(148, 163, 184);
 
                 lblTimerClock.Text = "00:00:00";
-                lblTimerClock.ForeColor = Color.FromArgb(100, 116, 139);
+                lblTimerClock.ForeColor = Color.FromArgb(148, 163, 184);
 
                 btnStopActive.Enabled = false;
-                btnStopActive.BackColor = Color.FromArgb(71, 85, 105);
+                btnStopActive.BackColor = Color.FromArgb(26, 32, 44);
+                btnStopActive.ForeColor = Color.FromArgb(148, 163, 184);
+                btnStopActive.FlatAppearance.BorderColor = Color.FromArgb(45, 55, 72);
                 notifyIcon.Text = "Jira Focus Timer — Inativo";
             }
         }
