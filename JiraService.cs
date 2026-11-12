@@ -22,8 +22,8 @@ namespace JiraTimerManagement
 
     public class JiraUserConfig
     {
-        public string BaseUrl { get; set; } = "https://larcoop.atlassian.net";
-        public string Email { get; set; } = "pires.sistemas@lar.ind.br";
+        public string BaseUrl { get; set; } = "https://sua-empresa.atlassian.net";
+        public string Email { get; set; } = "dev@exemplo.com";
         public string ApiToken { get; set; } = "";
         public string SelectedProjectKey { get; set; } = "ALL";
         public bool UseSimulationMode { get; set; } = true;
@@ -99,12 +99,12 @@ namespace JiraTimerManagement
                 new JiraTaskItem
                 {
                     Id = "1001",
-                    Key = "NDSTRS-142",
-                    Summary = "Otimizar endpoint de integração de notas fiscais de cooperados",
+                    Key = "APP-142",
+                    Summary = "Otimizar endpoint de integração da API de pedidos e faturamento",
                     Status = "Em Andamento",
-                    ProjectKey = "NDSTRS",
-                    ProjectName = "Sistemas Industriais",
-                    Assignee = "Lucas Mariani Pires",
+                    ProjectKey = "APP",
+                    ProjectName = "Plataforma Core",
+                    Assignee = "Desenvolvedor Demo",
                     TimeSpentSeconds = 5400, // 1h 30m
                     IsAssignedToMe = true,
                     IsCeremonyOrShared = false
@@ -112,12 +112,12 @@ namespace JiraTimerManagement
                 new JiraTaskItem
                 {
                     Id = "1002",
-                    Key = "NDSTRS-148",
-                    Summary = "[Urgente/Ligação] Corrigir travamento na fila de pesagem da balança",
+                    Key = "APP-148",
+                    Summary = "[Urgente/Ligação] Corrigir travamento no processamento da fila de mensagens",
                     Status = "Em Andamento",
-                    ProjectKey = "NDSTRS",
-                    ProjectName = "Sistemas Industriais",
-                    Assignee = "Lucas Mariani Pires",
+                    ProjectKey = "APP",
+                    ProjectName = "Plataforma Core",
+                    Assignee = "Desenvolvedor Demo",
                     TimeSpentSeconds = 1800, // 30m
                     IsAssignedToMe = true,
                     IsCeremonyOrShared = false
@@ -125,12 +125,12 @@ namespace JiraTimerManagement
                 new JiraTaskItem
                 {
                     Id = "1003",
-                    Key = "NDSTRS-151",
-                    Summary = "Criar relatório de apontamento de produção por turno",
+                    Key = "APP-151",
+                    Summary = "Criar relatório consolidado de indicadores de performance",
                     Status = "A Fazer",
-                    ProjectKey = "NDSTRS",
-                    ProjectName = "Sistemas Industriais",
-                    Assignee = "Lucas Mariani Pires",
+                    ProjectKey = "APP",
+                    ProjectName = "Plataforma Core",
+                    Assignee = "Desenvolvedor Demo",
                     TimeSpentSeconds = 0,
                     IsAssignedToMe = true,
                     IsCeremonyOrShared = false
@@ -139,11 +139,11 @@ namespace JiraTimerManagement
                 {
                     Id = "1004",
                     Key = "SUP-89",
-                    Summary = "[Suporte Ligação] Desbloquear lote de expedição travado no WMS",
+                    Summary = "[Suporte Ligação] Desbloquear lote de sincronização pendente no serviço",
                     Status = "Em Atendimento",
                     ProjectKey = "SUP",
-                    ProjectName = "Suporte Interno TI",
-                    Assignee = "Lucas Mariani Pires",
+                    ProjectName = "Suporte & Sustentação",
+                    Assignee = "Desenvolvedor Demo",
                     TimeSpentSeconds = 900, // 15m
                     IsAssignedToMe = true,
                     IsCeremonyOrShared = false
@@ -151,12 +151,12 @@ namespace JiraTimerManagement
                 new JiraTaskItem
                 {
                     Id = "1005",
-                    Key = "COOP-310",
-                    Summary = "Refatorar autenticação SSO dos portais internos da cooperativa",
+                    Key = "WEB-310",
+                    Summary = "Refatorar autenticação SSO e renovação de tokens OAuth2 no portal web",
                     Status = "Em Revisão",
-                    ProjectKey = "COOP",
-                    ProjectName = "Portal Cooperativista",
-                    Assignee = "Lucas Mariani Pires",
+                    ProjectKey = "WEB",
+                    ProjectName = "Portal Web",
+                    Assignee = "Desenvolvedor Demo",
                     TimeSpentSeconds = 7200, // 2h
                     IsAssignedToMe = true,
                     IsCeremonyOrShared = false
@@ -166,11 +166,11 @@ namespace JiraTimerManagement
                 new JiraTaskItem
                 {
                     Id = "2001",
-                    Key = "NDSTRS-100",
+                    Key = "APP-100",
                     Summary = "[Cerimônia] Daily Scrum & Alinhamentos Diários da Equipe",
                     Status = "Recorrente Sprint",
-                    ProjectKey = "NDSTRS",
-                    ProjectName = "Sistemas Industriais",
+                    ProjectKey = "APP",
+                    ProjectName = "Plataforma Core",
                     Assignee = "Não atribuído (Cerimônia)",
                     TimeSpentSeconds = 10800, // 3h acumuladas no time
                     IsAssignedToMe = false,
@@ -179,11 +179,11 @@ namespace JiraTimerManagement
                 new JiraTaskItem
                 {
                     Id = "2002",
-                    Key = "NDSTRS-101",
+                    Key = "APP-101",
                     Summary = "[Cerimônia] Planning, Refinamento Técnico & Review da Sprint",
                     Status = "Recorrente Sprint",
-                    ProjectKey = "NDSTRS",
-                    ProjectName = "Sistemas Industriais",
+                    ProjectKey = "APP",
+                    ProjectName = "Plataforma Core",
                     Assignee = "Não atribuído (Cerimônia)",
                     TimeSpentSeconds = 7200, // 2h
                     IsAssignedToMe = false,
@@ -196,7 +196,7 @@ namespace JiraTimerManagement
                     Summary = "[Cerimônia / Chamadas] Ligações Rápidas, Alinhamentos e Plantão TI",
                     Status = "Recorrente",
                     ProjectKey = "SUP",
-                    ProjectName = "Suporte Interno TI",
+                    ProjectName = "Suporte & Sustentação",
                     Assignee = "Não atribuído (Cerimônia)",
                     TimeSpentSeconds = 3600, // 1h
                     IsAssignedToMe = false,
@@ -205,11 +205,11 @@ namespace JiraTimerManagement
                 new JiraTaskItem
                 {
                     Id = "2004",
-                    Key = "COOP-50",
+                    Key = "WEB-50",
                     Summary = "[Cerimônia] Reunião Geral de Arquitetura e Sincronização de Times",
                     Status = "Recorrente",
-                    ProjectKey = "COOP",
-                    ProjectName = "Portal Cooperativista",
+                    ProjectKey = "WEB",
+                    ProjectName = "Portal Web",
                     Assignee = "Não atribuído (Cerimônia)",
                     TimeSpentSeconds = 1800, // 30m
                     IsAssignedToMe = false,
@@ -220,11 +220,11 @@ namespace JiraTimerManagement
                 new JiraTaskItem
                 {
                     Id = "3001",
-                    Key = "NDSTRS-3513",
-                    Summary = "552707 - Divergencias de estoque e integração com SICOP",
+                    Key = "APP-351",
+                    Summary = "Analisar divergências de saldo e conciliação de registros via webhook",
                     Status = "Aguardando Revisão",
-                    ProjectKey = "NDSTRS",
-                    ProjectName = "Sistemas Industriais",
+                    ProjectKey = "APP",
+                    ProjectName = "Plataforma Core",
                     Assignee = "Não atribuído",
                     TimeSpentSeconds = 15780, // 4h 23m
                     IsAssignedToMe = false,
@@ -233,11 +233,11 @@ namespace JiraTimerManagement
                 new JiraTaskItem
                 {
                     Id = "3002",
-                    Key = "NDSTRS-3520",
-                    Summary = "[Sustentação] Ajuste de concorrência no fechamento de lote fiscal",
+                    Key = "APP-352",
+                    Summary = "[Sustentação] Ajuste de concorrência no fechamento de transações em lote",
                     Status = "Em Andamento",
-                    ProjectKey = "NDSTRS",
-                    ProjectName = "Sistemas Industriais",
+                    ProjectKey = "APP",
+                    ProjectName = "Plataforma Core",
                     Assignee = "Outro Desenvolvedor",
                     TimeSpentSeconds = 3600,
                     IsAssignedToMe = false,
@@ -247,10 +247,10 @@ namespace JiraTimerManagement
                 {
                     Id = "3003",
                     Key = "SUP-112",
-                    Summary = "[Sustentação] Investigar lentidão na consulta de romaneios",
+                    Summary = "[Sustentação] Investigar lentidão na consulta paginada de relatórios",
                     Status = "Aberto",
                     ProjectKey = "SUP",
-                    ProjectName = "Suporte Interno TI",
+                    ProjectName = "Suporte & Sustentação",
                     Assignee = "Não atribuído",
                     TimeSpentSeconds = 0,
                     IsAssignedToMe = false,
@@ -295,7 +295,7 @@ namespace JiraTimerManagement
 
         private HttpRequestMessage CreateJiraRequest(HttpMethod method, string relativeUrl, JiraUserConfig config, string jsonBody = null)
         {
-            string baseUrl = (config.BaseUrl ?? "https://larcoop.atlassian.net").TrimEnd('/');
+            string baseUrl = (config.BaseUrl ?? "https://sua-empresa.atlassian.net").TrimEnd('/');
             var request = new HttpRequestMessage(method, baseUrl + relativeUrl);
 
             string rawAuth = $"{config.Email}:{config.ApiToken}";
@@ -316,7 +316,7 @@ namespace JiraTimerManagement
             if (config.UseSimulationMode)
             {
                 await Task.Delay(120);
-                return (true, "Lucas Mariani Pires (Modo Protótipo)", null);
+                return (true, "Desenvolvedor Demo (Modo Protótipo)", null);
             }
 
             if (string.IsNullOrWhiteSpace(config.Email) || string.IsNullOrWhiteSpace(config.ApiToken))
@@ -359,9 +359,9 @@ namespace JiraTimerManagement
             if (config.UseSimulationMode)
             {
                 await Task.Delay(80);
-                list.Add(new JiraProjectItem { Key = "NDSTRS", Name = "Sistemas Industriais" });
-                list.Add(new JiraProjectItem { Key = "SUP", Name = "Suporte Interno TI" });
-                list.Add(new JiraProjectItem { Key = "COOP", Name = "Portal Cooperativista" });
+                list.Add(new JiraProjectItem { Key = "APP", Name = "Plataforma Core" });
+                list.Add(new JiraProjectItem { Key = "SUP", Name = "Suporte & Sustentação" });
+                list.Add(new JiraProjectItem { Key = "WEB", Name = "Portal Web" });
                 return list;
             }
 
@@ -393,9 +393,9 @@ namespace JiraTimerManagement
             }
             catch
             {
-                if (!list.Any(p => p.Key == "NDSTRS"))
+                if (!list.Any(p => p.Key == "APP"))
                 {
-                    list.Add(new JiraProjectItem { Key = "NDSTRS", Name = "Projeto NDSTRS" });
+                    list.Add(new JiraProjectItem { Key = "APP", Name = "Projeto Principal" });
                 }
             }
 

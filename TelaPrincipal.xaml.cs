@@ -270,7 +270,7 @@ namespace JiraTimerManagement
                 return;
             }
 
-            string cleanHost = (_config.BaseUrl ?? "larcoop.atlassian.net")
+            string cleanHost = (_config.BaseUrl ?? "sua-empresa.atlassian.net")
                 .Replace("https://", "")
                 .Replace("http://", "")
                 .TrimEnd('/');
@@ -561,7 +561,7 @@ namespace JiraTimerManagement
             if (string.IsNullOrWhiteSpace(issueKey)) return;
             try
             {
-                string baseUrl = (_config?.BaseUrl ?? "https://larcoop.atlassian.net").TrimEnd('/');
+                string baseUrl = (_config?.BaseUrl ?? "https://sua-empresa.atlassian.net").TrimEnd('/');
                 string url = $"{baseUrl}/browse/{Uri.EscapeDataString(issueKey.Trim())}";
                 Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
             }

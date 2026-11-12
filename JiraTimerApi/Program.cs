@@ -27,11 +27,11 @@ JiraCredentials ResolveCredentials(HttpContext ctx, IConfiguration config)
 {
     var baseUrl = ctx.Request.Headers["X-Jira-Url"].FirstOrDefault()
                   ?? config["Jira:BaseUrl"]
-                  ?? "https://larcoop.atlassian.net";
+                  ?? "https://sua-empresa.atlassian.net";
 
     var email = ctx.Request.Headers["X-Jira-Email"].FirstOrDefault()
                 ?? config["Jira:Email"]
-                ?? "pires.sistemas@lar.ind.br";
+                ?? "dev@exemplo.com";
 
     var token = ctx.Request.Headers["X-Jira-Token"].FirstOrDefault()
                 ?? config["Jira:ApiToken"]
@@ -104,7 +104,7 @@ app.MapGet("/api/ativos", async (string? projectKey, HttpContext ctx, IConfigura
 app.MapGet("/tarefas-jira", async (string? projectKey, HttpContext ctx, IConfiguration config, JiraClientService jira) =>
 {
     var creds = ResolveCredentials(ctx, config);
-    var targetProject = projectKey ?? config["Jira:DefaultProject"] ?? "NDSTRS";
+    var targetProject = projectKey ?? config["Jira:DefaultProject"] ?? "ALL";
     var (issues, error, statusCode) = await jira.GetAssignedIssuesAsync(creds, targetProject, onlyAssignedToMe: true);
     if (issues == null)
     {

@@ -473,7 +473,7 @@
                                 </Grid.ColumnDefinitions>
                                 <Border Grid.Column="0" Background="#111113" BorderBrush="#2E2E34" BorderThickness="1" CornerRadius="6" Padding="8,5" Margin="0,0,8,0">
                                     <Grid>
-                                        <TextBlock Text="Filtrar por código (ex: NDSTRS-100, Daily) ou título..."
+                                        <TextBlock Text="Filtrar por código (ex: APP-100, Daily) ou título..."
                                                    Foreground="#71717A" FontSize="11.5" IsHitTestVisible="False" VerticalAlignment="Center">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">

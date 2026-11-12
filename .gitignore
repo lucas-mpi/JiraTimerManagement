@@ -8,3 +8,9 @@
 *.sln.docstates
 launchSettings.json
 appsettings.Development.json
+
+## Ignorar documentos acadêmicos e arquivos locais de trabalho
+*.docx
+*.pdf
+~$*.docx
+Diagrama_Metodologia.png
